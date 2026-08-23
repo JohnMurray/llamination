@@ -1,8 +1,10 @@
-# Ignore Gradle project-specific cache directory
-.gradle
+# Go build and test artifacts
+bin/
+*.test
+coverage.out
 
-# Ignore Gradle build output directory
-build
+# Legacy Gradle cache (the previous backend used Gradle)
+.gradle/
 
-# Ignore Kotlin plugin data
-.kotlin
+# Local IDE settings
+.idea/
