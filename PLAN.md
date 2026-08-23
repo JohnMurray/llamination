@@ -7,11 +7,12 @@ Build a browser-based real-time-strategy game inspired by *Age of Empires* and *
 - A Canvas-based browser client for rendering, input, UI, audio, and presentation.
 - A Java/Spring Boot server that owns the authoritative game simulation.
 - WebSockets for low-latency commands, events, and state synchronization.
-- An initial focus on small multiplayer matches, with the architecture kept suitable for AI opponents and larger matches later.
+- Two opposing factions, each cooperatively controlled by a team of up to 4 players who share resources, units, buildings, and victory or defeat.
+- An initial focus on small team matches, with the architecture kept suitable for AI opponents later.
 
 The first release should prove the core RTS loop rather than attempt the full scope of either inspiration:
 
-1. Join or create a match.
+1. Join or create a match and choose a team.
 2. Select and command units.
 3. Gather two resources.
 4. Construct a small set of buildings.
@@ -20,10 +21,11 @@ The first release should prove the core RTS loop rather than attempt the full sc
 
 ### Initial constraints
 
-- 2 players per match.
+- Two teams with 1-4 players each (2-8 players per match); uneven team sizes are allowed for private/testing matches.
 - One handcrafted map, approximately 128 x 128 tiles.
-- 20-50 units per player, with a stretch goal of 100.
-- One faction with 3 worker/military unit types and 4-6 building types.
+- 20-50 units per team, with a stretch goal of 100; teammates command the same unit pool.
+- One mechanically identical faction ruleset for both teams, with 3 worker/military unit types and 4-6 building types; team color distinguishes sides.
+- No per-player resource or unit ownership within a team. The MVP uses fully shared control, with visible teammate selections/orders and server-defined conflict resolution for simultaneous commands.
 - Desktop browsers first; mobile and touch controls are out of scope for the MVP.
 - No fog of war, ranked matchmaking, replays, campaigns, or persistent progression in the first playable version.
 
@@ -50,9 +52,9 @@ Use a conventional frontend toolchain (Vite, TypeScript, Vitest, and ESLint). Th
 Use the existing Java 26 and Spring Boot project. Organize the backend into clear boundaries:
 
 - `transport`: WebSocket sessions, authentication/identity, message validation, and protocol mapping.
-- `lobby`: match creation, joining, readiness, and lifecycle.
+- `lobby`: match creation, team assignment, joining, readiness, and lifecycle.
 - `simulation`: fixed-tick game loop and deterministic game rules.
-- `world`: maps, entities, components, spatial queries, and player state.
+- `world`: maps, entities, components, spatial queries, team state, and player-to-team membership.
 - `systems`: movement, gathering, construction, production, combat, visibility, and victory.
 - `content`: data definitions for units, buildings, weapons, costs, and balance.
 - `persistence`: initially optional; later stores accounts, match history, and replays.
@@ -94,7 +96,7 @@ Server-to-client messages include:
 - game event batch (damage, death, completion, resource delivery)
 - match ended and error messages
 
-Every message should carry a protocol version and relevant sequence/tick identifiers. Commands must be validated for schema, ownership, affordability, legal placement, and rate limits. The server should periodically send full or checksum-bearing snapshots so clients can recover from missed or inconsistent deltas.
+Match/lobby messages must carry team assignment, teammate presence/readiness, and shared-control identity. Every message should carry a protocol version and relevant sequence/tick identifiers. Commands must be validated for schema, team authority, shared-team affordability, legal placement, and per-player/team rate limits. Each command records its issuing player for acknowledgements, diagnostics, and teammate UI, even though its target entities belong to the team. Commands accepted for the same simulation tick are resolved in a documented stable order. The server should periodically send full or checksum-bearing snapshots so clients can recover from missed or inconsistent deltas.
 
 ### State synchronization
 
@@ -121,6 +123,7 @@ Every message should carry a protocol version and relevant sequence/tick identif
 - Click to select; drag a box for multi-selection; use modifiers to add/remove units.
 - Right click for context-sensitive commands.
 - Show selection rings, health bars, destinations, invalid placement, and command acknowledgements.
+- Distinguish local selection and orders from teammate selection and orders without obscuring team ownership.
 - Add control groups and double-click selection after basic input is reliable.
 
 ### Entities and content
@@ -150,7 +153,7 @@ Initial content:
 ### Economy and construction
 
 - Workers travel to a resource, gather a limited carried amount, return it to a valid drop-off, and repeat.
-- Building placement validates terrain, footprint, collision, ownership, and resource cost on the server.
+- Building placement validates terrain, footprint, collision, team authority, and shared-team resource cost on the server.
 - Workers construct buildings over time; unfinished structures have incomplete health and no production capability.
 - Production buildings maintain a queue, consume resources when an item is accepted, and spawn into a legal nearby tile.
 
@@ -163,9 +166,10 @@ Initial content:
 
 ### Match rules
 
-- Assign spawn positions and starting resources.
-- Start after all players are ready and assets are loaded.
-- A player loses when their headquarters is destroyed or they surrender/disconnect beyond a grace period.
+- Assign one spawn position and shared starting resources to each team.
+- Start after both teams have at least one player and every connected player is ready and assets are loaded.
+- All teammates can command all of their team's entities and spend the shared resource pool. The server serializes conflicting orders deterministically and attributes each accepted order to its issuer.
+- A team loses when its headquarters is destroyed or every teammate has surrendered/disconnected beyond a grace period; one player's departure does not forfeit the team while a teammate remains.
 - Produce an authoritative result and a final statistics summary.
 
 ## 4. Delivery Phases
@@ -187,7 +191,7 @@ Each phase ends in a runnable, demonstrable increment. Do not begin large amount
 ### Phase 1: Offline simulation and renderer slice
 
 - Implement the fixed-tick simulation runner independent of WebSockets.
-- Add world/entity storage, positions, ownership, map loading, and content definitions.
+- Add world/entity storage, positions, team ownership, player-team membership, map loading, and content definitions.
 - Render the map and placeholder units from a local snapshot.
 - Implement camera movement, zoom, selection, and order indicators.
 - Add basic unit movement and A* pathfinding in simulation tests.
@@ -197,34 +201,34 @@ Each phase ends in a runnable, demonstrable increment. Do not begin large amount
 
 ### Phase 2: Authoritative multiplayer movement
 
-- Add lobby creation/join/readiness and match lifecycle management.
+- Add lobby creation, team selection/assignment, 1-4 player team capacity, readiness, and match lifecycle management.
 - Route validated player commands from WebSocket sessions to the correct match.
 - Send initial snapshots and state deltas.
 - Add client snapshot buffering and interpolation.
-- Implement ownership checks, disconnect handling, and command acknowledgement/rejection.
+- Implement team-authority checks, teammate presence, shared-order attribution/conflict handling, disconnect handling, and command acknowledgement/rejection.
 - Add a developer diagnostics overlay for FPS, server tick, latency, entity count, and bytes per second.
 
-**Exit criterion:** Two browser windows can join one match and reliably see each other's unit movement under simulated latency.
+**Exit criterion:** At least three browser windows can join one match, including two on the same team; teammates can both command the same units, opponents cannot, and all clients reliably see movement and command attribution under simulated latency.
 
 ### Phase 3: Economy and production
 
-- Add resource nodes, worker gathering, carrying, drop-off, and resource accounting.
+- Add resource nodes, worker gathering, carrying, drop-off, and shared team resource accounting.
 - Add building placement mode and authoritative placement validation.
 - Add construction progress, production queues, unit spawning, and cancellation rules.
 - Implement the HUD and contextual command/build panels.
 - Add content validation and tune the initial costs/timings enough to exercise the loop.
 
-**Exit criterion:** Two players can grow an economy, construct a barracks, and produce military units without server/client state disagreement.
+**Exit criterion:** Teammates can jointly grow one economy, construct a barracks, and produce military units from shared resources without double-spending or server/client state disagreement.
 
 ### Phase 4: Combat and victory
 
 - Add attack, attack-move, target acquisition, range, cooldowns, health, death, and cleanup.
 - Add combat feedback: health bars, hit effects, projectiles, sound hooks, and notifications.
-- Add headquarters defeat, surrender, match timer, end screen, and statistics.
+- Add team headquarters defeat, individual surrender/leave behavior, match timer, team end screen, and player/team statistics.
 - Add basic command spam limits and malformed-message resilience.
 - Run full-match soak tests and balance the first faction for a 10-20 minute target match.
 
-**Exit criterion:** A complete two-player match can be played from lobby to victory with the intended gather-build-produce-fight loop.
+**Exit criterion:** A complete match with at least two players on each team can be played from lobby to team victory with the intended cooperative gather-build-produce-fight loop.
 
 ### Phase 5: Quality, scale, and deployment
 
@@ -257,12 +261,13 @@ Prioritize these based on playtest evidence rather than implementing all at once
 - Unit-test command validation and each game system.
 - Use deterministic scenario tests: start from a fixture, enqueue commands, advance N ticks, and compare the resulting state or checksum.
 - Test edge cases such as simultaneous attacks, blocked spawns, destroyed targets, depleted resources, invalid placements, and disconnects.
-- Add property-based tests for invariants such as non-negative resources, unique entity IDs, valid ownership, and legal map occupancy.
+- Test simultaneous teammate orders, shared-resource contention, teammate disconnect/rejoin, and the final teammate leaving or surrendering.
+- Add property-based tests for invariants such as non-negative team resources, unique entity IDs, valid team ownership, valid player-team membership, and legal map occupancy.
 
 ### Protocol tests
 
 - Maintain representative message fixtures for every protocol version.
-- Test malformed, oversized, stale, duplicate, unauthorized, and out-of-order commands.
+- Test malformed, oversized, stale, duplicate, opposing-team, unauthorized, and out-of-order commands.
 - Verify snapshot/delta reconstruction against authoritative state.
 - Add compatibility tests before changing message fields.
 
@@ -270,7 +275,7 @@ Prioritize these based on playtest evidence rather than implementing all at once
 
 - Unit-test coordinate transforms, selection geometry, interpolation, input-to-command translation, and state reduction.
 - Keep renderer logic separable enough to test world-to-screen behavior without pixel snapshots.
-- Use browser end-to-end tests for connect, join, select, order, build, train, attack, and match completion.
+- Use multi-browser end-to-end tests for connect, team assignment, readiness, shared selection/order visibility, concurrent spending, build, train, attack, disconnect, and team match completion.
 
 ### Performance and resilience tests
 
@@ -328,11 +333,11 @@ Complete these tasks in order to begin Phase 0 and Phase 1:
 4. Replace `HelloWebSocketHandler` with a connection/session handler.
 5. Implement a standalone fixed-tick `GameSimulation` and deterministic simulation test harness.
 6. Define the first map schema and content schemas; create one test map.
-7. Add entities with position, owner, selectable, movement, and collision data.
+7. Add teams and player membership, then entities with position, team owner, selectable, movement, and collision data.
 8. Render terrain and placeholder units with camera transforms.
 9. Implement click/box selection and issue a semantic move command.
 10. Implement grid navigation, A* pathfinding, and movement integration.
-11. Connect one browser to one authoritative match and synchronize movement.
+11. Connect two browsers as teammates to one authoritative match, synchronize movement, and verify shared unit authority.
 12. Add the diagnostics overlay and baseline performance scenario.
 
 ## 8. Major Risks and Mitigations
@@ -344,9 +349,10 @@ Complete these tasks in order to begin Phase 0 and Phase 1:
 - **Simulation tick overruns:** Track per-system timing, avoid blocking work on match threads, cap expensive work, and load-test multiple matches.
 - **Poor unit readability:** Prototype silhouettes, team colors, selection markers, health bars, and zoom levels before commissioning polished art.
 - **Late multiplayer surprises:** Make the first meaningful gameplay slice networked in Phase 2 rather than finishing an offline game first.
+- **Shared-control conflict and griefing:** Attribute orders, expose teammate intent, resolve same-tick conflicts deterministically, rate-limit per player and team, and use playtests to decide whether optional role/permission controls are needed after MVP.
 - **Protocol churn:** Version envelopes and schemas, keep compatibility fixtures, and separate transport DTOs from simulation objects.
-- **Cheating and abuse:** Never trust client state, validate all commands and ownership, rate-limit inputs, cap message sizes, and add authentication only when accounts are introduced.
+- **Cheating and abuse:** Never trust client state, validate all commands and team authority, rate-limit inputs per player and team, cap message sizes, and add authentication only when accounts are introduced.
 
 ## 9. Definition of MVP Complete
 
-The MVP is complete when two players can open the deployed game in supported desktop browsers, create/join a match, command units, gather resources, construct buildings, train an army, fight, and reach a server-authoritative victory result. The match must remain synchronized through normal latency and a reconnect, meet the agreed tick/render performance budgets at the target unit count, and pass automated simulation, protocol, client, end-to-end, and load smoke tests.
+The MVP is complete when two teams of up to four players can open the deployed game in supported desktop browsers, create/join a match, choose teams, and cooperatively command their team's shared units and resources to gather, construct buildings, train an army, fight, and reach a server-authoritative team victory result. The core cooperative case must be demonstrated with at least two players per team. The match must remain synchronized through normal latency and a reconnect, handle concurrent teammate commands and spending deterministically, meet the agreed tick/render performance budgets at the target team unit count, and pass automated simulation, protocol, client, multi-browser end-to-end, and load smoke tests.
