@@ -35,6 +35,67 @@ class BackendApplicationTests {
     }
 
     @Test
+    void loginCreatesSessionAndLogoutInvalidatesIt() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest login = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/auth/login"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"username\":\"commander\",\"password\":\"llama\"}"))
+                .build();
+
+        HttpResponse<String> loginResponse = client.send(login, HttpResponse.BodyHandlers.ofString());
+        String cookie = loginResponse.headers().firstValue("set-cookie").orElseThrow().split(";", 2)[0];
+
+        assertThat(loginResponse.statusCode()).isEqualTo(200);
+        assertThat(loginResponse.body()).isEqualTo("{\"authenticated\":true,\"username\":\"commander\"}");
+
+        HttpRequest session = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/auth/session"))
+                .header("Cookie", cookie)
+                .GET()
+                .build();
+        HttpResponse<String> sessionResponse = client.send(session, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(sessionResponse.body()).isEqualTo("{\"authenticated\":true,\"username\":\"commander\"}");
+
+        HttpRequest logout = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/auth/logout"))
+                .header("Cookie", cookie)
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        assertThat(client.send(logout, HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(204);
+
+        HttpResponse<String> loggedOutSession = client.send(session, HttpResponse.BodyHandlers.ofString());
+        assertThat(loggedOutSession.body()).isEqualTo("{\"authenticated\":false,\"username\":null}");
+    }
+
+    @Test
+    void loginRejectsInvalidCredentials() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/auth/login"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"username\":\"commander\",\"password\":\"wrong\"}"))
+                .build();
+        HttpResponse<String> response = HttpClient.newHttpClient()
+                .send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(response.headers().firstValue("set-cookie")).isEmpty();
+    }
+
+    @Test
+    void servesLoginPage() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/")).GET().build();
+        HttpResponse<String> response = HttpClient.newHttpClient()
+                .send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("id=\"login-form\"");
+    }
+
+    @Test
     void webSocketReturnsHelloWorldOnConnection() throws Exception {
         CompletableFuture<String> message = new CompletableFuture<>();
         StandardWebSocketClient client = new StandardWebSocketClient();
