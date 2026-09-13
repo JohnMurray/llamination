@@ -21,7 +21,9 @@ The first release should prove the core RTS loop rather than attempt the full sc
 
 ### Initial constraints
 
-- Two teams with 1-4 players each (2-8 players per match); uneven team sizes are allowed for private/testing matches.
+- Player limits are supplied by the selected map. Until the map catalog exists,
+  the placeholder map uses two teams with 1-3 players each (2-6 players per
+  match). Revisit these values when map metadata is introduced.
 - One handcrafted map, approximately 128 x 128 tiles.
 - 20-50 units per team, with a stretch goal of 100; teammates command the same unit pool.
 - One mechanically identical faction ruleset for both teams, with 3 worker/military unit types and 4-6 building types; team color distinguishes sides.
@@ -81,7 +83,7 @@ Use a single versioned protocol over WebSockets. JSON is appropriate during earl
 Client-to-server messages include:
 
 - `hello` / protocol negotiation
-- `create_match`, `join_match`, and `set_ready`
+- `create_lobby`, `join_lobby`, `auto_join_lobby`, `choose_team`, and `start_lobby`
 - `move_units`, `attack_target`, and `attack_move`
 - `gather_resource`, `build_structure`, and `train_unit`
 - `cancel_order`, `ping`, and `leave_match`
@@ -167,7 +169,10 @@ Initial content:
 ### Match rules
 
 - Assign one spawn position and shared starting resources to each team.
-- Start after both teams have at least one player and every connected player is ready and assets are loaded.
+- A full lobby starts after a ten-second warning. Its creator can trigger the
+  same countdown after the map minimum is reached and both teams can be
+  populated. Team choices lock when countdown begins; random choices are
+  balanced into remaining slots.
 - All teammates can command all of their team's entities and spend the shared resource pool. The server serializes conflicting orders deterministically and attributes each accepted order to its issuer.
 - A team loses when its headquarters is destroyed or every teammate has surrendered/disconnected beyond a grace period; one player's departure does not forfeit the team while a teammate remains.
 - Produce an authoritative result and a final statistics summary.
@@ -201,7 +206,8 @@ Each phase ends in a runnable, demonstrable increment. Do not begin large amount
 
 ### Phase 2: Authoritative multiplayer movement
 
-- Add lobby creation, team selection/assignment, 1-4 player team capacity, readiness, and match lifecycle management.
+- Build on lobby creation, public/private joining, team selection/random
+  assignment, map-derived capacity, countdown, and match lifecycle management.
 - Route validated player commands from WebSocket sessions to the correct match.
 - Send initial snapshots and state deltas.
 - Add client snapshot buffering and interpolation.
@@ -355,4 +361,13 @@ Complete these tasks in order to begin Phase 0 and Phase 1:
 
 ## 9. Definition of MVP Complete
 
-The MVP is complete when two teams of up to four players can open the deployed game in supported desktop browsers, create/join a match, choose teams, and cooperatively command their team's shared units and resources to gather, construct buildings, train an army, fight, and reach a server-authoritative team victory result. The core cooperative case must be demonstrated with at least two players per team. The match must remain synchronized through normal latency and a reconnect, handle concurrent teammate commands and spending deterministically, meet the agreed tick/render performance budgets at the target team unit count, and pass automated simulation, protocol, client, multi-browser end-to-end, and load smoke tests.
+The MVP is complete when two map-constrained teams (temporarily up to three
+players each) can open the deployed game in supported desktop browsers,
+create/join a match, choose teams, and cooperatively command their team's shared
+units and resources to gather, construct buildings, train an army, fight, and
+reach a server-authoritative team victory result. The core cooperative case
+must be demonstrated with at least two players per team. The match must remain
+synchronized through normal latency and a reconnect, handle concurrent
+teammate commands and spending deterministically, meet the agreed tick/render
+performance budgets at the target team unit count, and pass automated
+simulation, protocol, client, multi-browser end-to-end, and load smoke tests.

@@ -24,17 +24,6 @@ class BackendApplicationTests {
     private int port;
 
     @Test
-    void apiReturnsHelloWorld() throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(
-                URI.create("http://localhost:" + port + "/api/hello")).GET().build();
-        HttpResponse<String> response = HttpClient.newHttpClient()
-                .send(request, HttpResponse.BodyHandlers.ofString());
-
-        assertThat(response.statusCode()).isEqualTo(200);
-        assertThat(response.body()).isEqualTo("{\"message\":\"Hello, World!\"}");
-    }
-
-    @Test
     void loginCreatesSessionAndLogoutInvalidatesIt() throws Exception {
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest login = HttpRequest.newBuilder(
@@ -92,11 +81,21 @@ class BackendApplicationTests {
                 .send(request, HttpResponse.BodyHandlers.ofString());
 
         assertThat(response.statusCode()).isEqualTo(200);
-        assertThat(response.body()).contains("id=\"login-form\"");
+        assertThat(response.body()).contains("id=\"root\"");
     }
 
     @Test
-    void webSocketReturnsHelloWorldOnConnection() throws Exception {
+    void authenticatedWebSocketAcceptsConnection() throws Exception {
+        HttpRequest login = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/auth/login"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"username\":\"commander\",\"password\":\"llama\"}"))
+                .build();
+        HttpResponse<String> loginResponse = HttpClient.newHttpClient()
+                .send(login, HttpResponse.BodyHandlers.ofString());
+        String cookie = loginResponse.headers().firstValue("set-cookie").orElseThrow().split(";", 2)[0];
+
         CompletableFuture<String> message = new CompletableFuture<>();
         StandardWebSocketClient client = new StandardWebSocketClient();
         WebSocketHandler handler = new WebSocketHandler() {
@@ -124,10 +123,16 @@ class BackendApplicationTests {
             }
         };
 
-        WebSocketSession session = client.execute(handler, "ws://localhost:" + port + "/ws/hello")
+        org.springframework.web.socket.WebSocketHttpHeaders headers =
+                new org.springframework.web.socket.WebSocketHttpHeaders();
+        headers.add("Cookie", cookie);
+        WebSocketSession session = client.execute(
+                        handler, headers, URI.create("ws://localhost:" + port + "/ws/events"))
                 .get(5, TimeUnit.SECONDS);
         try {
-            assertThat(message.get(5, TimeUnit.SECONDS)).isEqualTo("Hello, World!");
+            assertThat(message.get(5, TimeUnit.SECONDS))
+                    .contains("\"type\":\"connected\"")
+                    .contains("\"username\":\"commander\"");
         } finally {
             session.close();
         }

@@ -1,3 +1,8 @@
 # Development accounts. Format: username:password
 # Set LLAMINATION_USERS_FILE to use a different file.
 commander:llama
+scout:llama
+builder:llama
+rider:llama
+shepherd:llama
+herder:llama

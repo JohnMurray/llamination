@@ -13,8 +13,33 @@ cd backend
 ./gradlew bootRun
 ```
 
-Then open <http://localhost:8080>. The included development login is
-`commander` / `llama`.
+Then open <http://localhost:8080>. Six development accounts are included for
+multi-browser lobby testing: `commander`, `scout`, `builder`, `rider`,
+`shepherd`, and `herder`. Their development password is `llama`.
+
+For frontend development with hot reload, run the backend as above and start
+Vite in a second terminal:
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
+
+Vite proxies `/api` and `/ws` to Spring Boot. A production frontend build is
+also run automatically as part of the Gradle resource build.
+
+## Lobby foundation
+
+Authenticated players can create public or private lobbies, browse and join
+open public lobbies, follow private invite links, select a team or request a
+random assignment, and auto-join a random public lobby. The server owns lobby
+capacity and lifecycle state, including the ten-second start countdown.
+
+The placeholder map currently fixes lobbies at a minimum of 2 and maximum of 6
+players, with up to 3 players per team. These values are exposed through
+`LobbyConstraintsProvider` and must be replaced with constraints from the
+selected map when the map catalog is implemented.
 
 Accounts are read from `backend/config/users.txt` in `username:password` format.
 Blank lines and lines beginning with `#` are ignored. Set `LLAMINATION_USERS_FILE`

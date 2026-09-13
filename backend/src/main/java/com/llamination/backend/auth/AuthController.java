@@ -15,13 +15,15 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
-
-    private static final String USERNAME_ATTRIBUTE = "username";
-
     private final UserCredentialStore credentialStore;
 
-    public AuthController(UserCredentialStore credentialStore) {
+    private final com.llamination.backend.lobby.LobbyService lobbyService;
+
+    public AuthController(
+            UserCredentialStore credentialStore,
+            com.llamination.backend.lobby.LobbyService lobbyService) {
         this.credentialStore = credentialStore;
+        this.lobbyService = lobbyService;
     }
 
     @PostMapping("/login")
@@ -32,14 +34,16 @@ public class AuthController {
 
         HttpSession session = request.getSession(true);
         request.changeSessionId();
-        session.setAttribute(USERNAME_ATTRIBUTE, credentials.username());
+        session.setAttribute(SessionIdentity.USERNAME_ATTRIBUTE, credentials.username());
         return new SessionResponse(true, credentials.username());
     }
 
     @GetMapping("/session")
     public SessionResponse session(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
-        String username = session == null ? null : (String) session.getAttribute(USERNAME_ATTRIBUTE);
+        String username = session == null
+                ? null
+                : (String) session.getAttribute(SessionIdentity.USERNAME_ATTRIBUTE);
         return new SessionResponse(username != null, username);
     }
 
@@ -48,6 +52,10 @@ public class AuthController {
     public void logout(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
         if (session != null) {
+            String username = (String) session.getAttribute(SessionIdentity.USERNAME_ATTRIBUTE);
+            if (username != null) {
+                lobbyService.leaveIfPresent(username);
+            }
             session.invalidate();
         }
     }
