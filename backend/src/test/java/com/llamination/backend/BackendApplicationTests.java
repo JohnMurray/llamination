@@ -18,7 +18,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class BackendApplicationTests {
+class BackendApplicationTests extends InfrastructureIntegrationTest {
 
     @Value("${local.server.port}")
     private int port;
