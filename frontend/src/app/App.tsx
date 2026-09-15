@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react
 import { useAuth } from '../auth/AuthProvider';
 import { LoginPage } from '../auth/LoginPage';
 import { GamePage } from '../game/GamePage';
+import { GameSandboxPage } from '../game/GameSandboxPage';
 import { CreateLobbyPage } from '../lobbies/CreateLobbyPage';
 import { InvitePage } from '../lobbies/InvitePage';
 import { LobbyBrowserPage } from '../lobbies/LobbyBrowserPage';
@@ -17,6 +18,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/sandbox" element={<GameSandboxPage />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/lobbies" element={<LobbyBrowserPage />} />
         <Route path="/lobbies/new" element={<CreateLobbyPage />} />
