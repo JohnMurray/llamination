@@ -1,0 +1,33 @@
+# Development-only backing services. The application itself runs on the host for fast iteration.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${LLAMINATION_POSTGRES_DB:-llamination}
+      POSTGRES_USER: ${LLAMINATION_POSTGRES_USER:-llamination}
+      POSTGRES_PASSWORD: ${LLAMINATION_POSTGRES_PASSWORD:-llamination}
+    ports:
+      - "127.0.0.1:${LLAMINATION_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "127.0.0.1:${LLAMINATION_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+
