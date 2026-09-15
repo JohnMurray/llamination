@@ -31,13 +31,29 @@ limits locally.
 5. Countdown expiry moves through `STARTING` exactly once, creates a game, and
    then publishes `STARTED` with its game identifier.
 
-Lobby mutations are serialized by `LobbyService`. This makes list visibility,
-capacity checks, membership, and countdown transitions atomic for the current
-single-server in-memory implementation.
+Lobby mutations run in PostgreSQL transactions. Mutating commands lock the
+lobby header row before loading members, so capacity checks, team selection,
+membership, and lifecycle transitions remain atomic even when another backend
+process targets the same lobby. A unique membership constraint prevents one
+stable user ID from occupying multiple active lobbies.
 
-## Persistence boundary
+## Persistence and restart recovery
 
-Lobby state intentionally disappears when the server restarts. Before running
-multiple server instances, replace `InMemoryLobbyRepository` with durable
-storage and introduce cross-instance coordination for capacity and countdown
-transitions.
+PostgreSQL is authoritative for the lobby header, members, map constraints,
+version, and countdown deadline. WebSocket events are published only after the
+transaction commits. Private invite bearer tokens are returned to the creator
+but only their SHA-256 hashes are stored; an already shared link continues to
+work after restart even when the raw token is no longer displayed.
+
+Every countdown has a durable `countdown_ends_at` value. Startup reconstructs
+future timers, and a periodic reconciler finds overdue countdowns that may have
+been missed during downtime. Completion locks the row and checks its state and
+version, so duplicate timers cannot create two transitions. The placeholder
+game starter derives an idempotent game ID from the lobby ID; the future
+simulation store must keep that idempotency contract.
+
+The initial runtime remains single-instance. PostgreSQL coordination is ready
+for multiple instances, but presence tracking and WebSocket connections remain
+local to one process. Before scaling horizontally, publish committed events
+through Redis and store expiring presence generations there so each instance
+can deliver to its own connected sockets.

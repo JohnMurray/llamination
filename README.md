@@ -6,19 +6,36 @@ coordinate amongst each other, sharing resources and units.
 
 ## Running locally
 
-Start the application with the launch script:
+Install Java 26, Node.js, and a Docker Compose provider. PostgreSQL and Redis run
+in containers; the backend and frontend build continue running directly on the
+host. Start the full development environment with:
 
 ```sh
-./launch.sh
+./dev.sh
 ```
 
-The launcher starts at port `8080`, selects the next available port if it is in
-use, and opens the application in your browser once the server is ready. Set
-`PORT` (or Spring's `SERVER_PORT`) to choose a different base port.
+The command waits for both stores to become healthy, starts the backend with the
+`dev` Spring profile, and opens the application. The launcher starts at port
+`8080`, selects the next available port if it is in use, and honors `PORT` or
+Spring's `SERVER_PORT` as the base port.
+
+Infrastructure can also be managed independently:
+
+```sh
+./dev.sh up
+./dev.sh logs
+./dev.sh down
+```
+
+Copy `.env.example` to `.env` to override local ports or credentials. PostgreSQL
+uses a named volume. `./dev.sh reset-data` deliberately deletes that volume and
+recreates an empty, migrated development database.
 
 Six development accounts are included for
 multi-browser lobby testing: `commander`, `scout`, `builder`, `rider`,
-`shepherd`, and `herder`. Their development password is `llama`.
+`shepherd`, and `herder`. Their development password is `llama`. These accounts
+are inserted by a dev-only Flyway migration and their passwords are BCrypt
+hashes; the application does not currently provide account registration.
 
 For frontend development with hot reload, run the backend as above and start
 Vite in a second terminal:
@@ -44,11 +61,8 @@ players, with up to 3 players per team. These values are exposed through
 `LobbyConstraintsProvider` and must be replaced with constraints from the
 selected map when the map catalog is implemented.
 
-Accounts are read from `backend/config/users.txt` in `username:password` format.
-Blank lines and lines beginning with `#` are ignored. Set `LLAMINATION_USERS_FILE`
-to point at another credentials file. The file is re-read on each login, so account
-changes do not require restarting the server.
-
-This deliberately simple credential store uses plain-text passwords and is intended
-for local development only. A deployed service should use salted password hashes and
-a managed account store.
+PostgreSQL is authoritative for accounts, active lobbies, memberships, and
+countdown deadlines. Redis stores disposable HTTP sessions. Lobby deadlines are
+recovered after backend restarts, while losing Redis requires players to sign in
+again without deleting their durable lobby state. See `docs/persistence.md` for
+the storage and multi-instance boundaries.

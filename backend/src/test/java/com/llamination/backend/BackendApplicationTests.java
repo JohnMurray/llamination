@@ -75,6 +75,19 @@ class BackendApplicationTests extends InfrastructureIntegrationTest {
     }
 
     @Test
+    void lobbyApiRejectsUnauthenticatedRequest() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/lobbies"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = HttpClient.newHttpClient()
+                .send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(401);
+    }
+
+    @Test
     void servesLoginPage() throws Exception {
         HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/")).GET().build();
         HttpResponse<String> response = HttpClient.newHttpClient()

@@ -59,7 +59,8 @@ Use the existing Java 26 and Spring Boot project. Organize the backend into clea
 - `world`: maps, entities, components, spatial queries, team state, and player-to-team membership.
 - `systems`: movement, gathering, construction, production, combat, visibility, and victory.
 - `content`: data definitions for units, buildings, weapons, costs, and balance.
-- `persistence`: initially optional; later stores accounts, match history, and replays.
+- `persistence`: PostgreSQL-backed accounts and active lobbies, Redis-backed sessions,
+  and later match history and replays.
 
 The server is authoritative: clients submit intent, and only the server changes canonical state. This limits cheating, prevents client divergence, and makes AI and replay support easier.
 
@@ -256,7 +257,7 @@ Prioritize these based on playtest evidence rather than implementing all at once
 - AI players and skirmish mode.
 - More factions, units, upgrades, maps, and neutral objectives.
 - Replays and spectator mode using the command/tick architecture.
-- Matchmaking, accounts, parties, and persistent match history.
+- Matchmaking, account registration/profiles, parties, and persistent match history.
 - Map editor and community maps.
 - Ranked play, anti-cheat hardening, moderation, and analytics.
 
@@ -357,7 +358,7 @@ Complete these tasks in order to begin Phase 0 and Phase 1:
 - **Late multiplayer surprises:** Make the first meaningful gameplay slice networked in Phase 2 rather than finishing an offline game first.
 - **Shared-control conflict and griefing:** Attribute orders, expose teammate intent, resolve same-tick conflicts deterministically, rate-limit per player and team, and use playtests to decide whether optional role/permission controls are needed after MVP.
 - **Protocol churn:** Version envelopes and schemas, keep compatibility fixtures, and separate transport DTOs from simulation objects.
-- **Cheating and abuse:** Never trust client state, validate all commands and team authority, rate-limit inputs per player and team, cap message sizes, and add authentication only when accounts are introduced.
+- **Cheating and abuse:** Never trust client state, validate all commands and team authority, rate-limit inputs per player and team, cap message sizes, and build on the existing authenticated account boundary.
 
 ## 9. Definition of MVP Complete
 

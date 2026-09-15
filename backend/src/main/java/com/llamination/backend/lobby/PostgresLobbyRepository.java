@@ -2,6 +2,7 @@ package com.llamination.backend.lobby;
 
 import java.sql.Types;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -58,10 +59,10 @@ public class PostgresLobbyRepository implements LobbyRepository {
                 .param("maxPlayers", lobby.constraints.maxPlayers())
                 .param("maxPlayersPerTeam", lobby.constraints.maxPlayersPerTeam())
                 .param("state", lobby.state.name())
-                .param("countdownEndsAt", lobby.countdownEndsAt, Types.TIMESTAMP_WITH_TIMEZONE)
+                .param("countdownEndsAt", utc(lobby.countdownEndsAt), Types.TIMESTAMP_WITH_TIMEZONE)
                 .param("gameId", lobby.gameId, Types.OTHER)
                 .param("inviteTokenHash", lobby.inviteTokenHash, Types.VARCHAR)
-                .param("createdAt", lobby.createdAt)
+                .param("createdAt", utc(lobby.createdAt))
                 .param("version", lobby.version)
                 .update();
 
@@ -129,7 +130,7 @@ public class PostgresLobbyRepository implements LobbyRepository {
     public Collection<PendingLobbyCountdown> findDueCountdowns(Instant now) {
         return findCountdowns(
                 "state = 'COUNTDOWN' AND countdown_ends_at IS NOT NULL AND countdown_ends_at <= :now",
-                Map.of("now", now));
+                Map.of("now", utc(now)));
     }
 
     @Override
@@ -165,6 +166,10 @@ public class PostgresLobbyRepository implements LobbyRepository {
                         resultSet.getObject("countdown_ends_at", OffsetDateTime.class).toInstant(),
                         resultSet.getLong("version")))
                 .list();
+    }
+
+    private static OffsetDateTime utc(Instant instant) {
+        return instant == null ? null : OffsetDateTime.ofInstant(instant, ZoneOffset.UTC);
     }
 
     private LobbyRow mapLobbyRow(java.sql.ResultSet resultSet, int rowNumber) throws java.sql.SQLException {
