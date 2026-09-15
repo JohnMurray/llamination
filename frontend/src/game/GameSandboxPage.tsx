@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { type Camera, SandboxNavigation } from './camera';
-import { createCenteredMapBounds, MinimapRenderer } from './minimap';
+import { createCenteredMapBounds, MinimapInteraction, MinimapRenderer } from './minimap';
 import './GameSandboxPage.css';
 
 const INITIAL_CAMERA: Camera = { x: 0, y: 10, zoom: 1 };
@@ -24,7 +24,8 @@ export function GameSandboxPage() {
 
     const context = canvas.getContext('2d');
     if (!context) return;
-    const minimapRenderer = new MinimapRenderer(minimapCanvas, createCenteredMapBounds(MAP_SIZE));
+    const mapBounds = createCenteredMapBounds(MAP_SIZE);
+    const minimapRenderer = new MinimapRenderer(minimapCanvas, mapBounds);
 
     let viewport = { width: 1, height: 1 };
     let animationFrame = 0;
@@ -53,6 +54,12 @@ export function GameSandboxPage() {
     });
     navigation.attach();
     navigationRef.current = navigation;
+    const minimapInteraction = new MinimapInteraction(
+      minimapCanvas,
+      mapBounds,
+      ({ x, y }) => navigation.centerAt(x, y),
+    );
+    minimapInteraction.attach();
 
     const render = (time: number) => {
       // Limit a single update after a suspended/background tab so the camera
@@ -70,6 +77,7 @@ export function GameSandboxPage() {
     return () => {
       cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
+      minimapInteraction.detach();
       navigation.detach();
       if (navigationRef.current === navigation) navigationRef.current = null;
     };
@@ -82,7 +90,7 @@ export function GameSandboxPage() {
   return (
     <main className="game-sandbox">
       <canvas ref={canvasRef} className="game-canvas" aria-label="Isometric game sandbox with a small colorful building" />
-      <canvas ref={minimapCanvasRef} className="minimap-canvas" aria-label="Map overview and current camera view" />
+      <canvas ref={minimapCanvasRef} className="minimap-canvas" aria-label="Click or drag to move the camera on the map" />
       <header className="sandbox-title">
         <p className="eyebrow">Renderer sandbox</p>
         <h1>Sunny pasture</h1>

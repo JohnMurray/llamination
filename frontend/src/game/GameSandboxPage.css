@@ -1,7 +1,7 @@
 .game-sandbox { position: relative; width: 100vw; height: 100vh; min-height: 32rem; overflow: hidden; background: #79b866; color: #243728; }
 .game-canvas { display: block; width: 100%; height: 100%; }
-/* The minimap is view-only for now; pointer events continue to reach the game canvas. */
-.minimap-canvas { position: absolute; top: clamp(1rem, 3vw, 2rem); right: clamp(1rem, 3vw, 2rem); width: clamp(9rem, 16vw, 12rem); aspect-ratio: 1; border: 3px solid #fff9e8; border-radius: .45rem; background: #73ad61; box-shadow: 0 .65rem 1.5rem #31543c4d; pointer-events: none; }
+.minimap-canvas { position: absolute; top: clamp(1rem, 3vw, 2rem); right: clamp(1rem, 3vw, 2rem); width: clamp(9rem, 16vw, 12rem); aspect-ratio: 1; border: 3px solid #fff9e8; border-radius: .45rem; background: #73ad61; box-shadow: 0 .65rem 1.5rem #31543c4d; cursor: crosshair; }
+.minimap-canvas:active { cursor: grabbing; }
 .sandbox-title { position: absolute; top: clamp(1.25rem, 4vw, 2.5rem); left: clamp(1.25rem, 4vw, 3rem); pointer-events: none; text-shadow: 0 2px 0 #fff8; }
 .sandbox-title .eyebrow { margin-bottom: .25rem; color: #416339; }
 .sandbox-title h1 { margin: 0; color: #2d4b35; font-size: clamp(2rem, 4vw, 3.5rem); }

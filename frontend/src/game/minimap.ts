@@ -15,6 +15,11 @@ export type Rectangle = {
   height: number;
 };
 
+export type WorldPoint = {
+  x: number;
+  y: number;
+};
+
 export function createCenteredMapBounds(size: number): WorldBounds {
   return { left: -size / 2, top: -size / 2, right: size / 2, bottom: size / 2 };
 }
@@ -50,6 +55,86 @@ export function calculateMinimapViewRect(
     width: (visibleWorld.right - visibleWorld.left) * scaleX,
     height: (visibleWorld.bottom - visibleWorld.top) * scaleY,
   };
+}
+
+/** Converts a minimap-local CSS-pixel position into projected world space. */
+export function minimapPointToWorld(
+  point: { x: number; y: number },
+  minimapViewport: Viewport,
+  mapBounds: WorldBounds,
+): WorldPoint {
+  // Dragging may continue beyond the canvas, so clamp to the nearest map edge.
+  const x = Math.min(minimapViewport.width, Math.max(0, point.x));
+  const y = Math.min(minimapViewport.height, Math.max(0, point.y));
+  return {
+    x: mapBounds.left + (x / minimapViewport.width) * (mapBounds.right - mapBounds.left),
+    y: mapBounds.top + (y / minimapViewport.height) * (mapBounds.bottom - mapBounds.top),
+  };
+}
+
+/**
+ * Translates mouse gestures on the minimap into world-space camera targets.
+ * Movement is observed on window so a drag remains continuous outside the map.
+ */
+export class MinimapInteraction {
+  private dragging = false;
+  private attached = false;
+
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly mapBounds: WorldBounds,
+    private readonly onNavigate: (point: WorldPoint) => void,
+  ) {}
+
+  attach() {
+    if (this.attached) return;
+    this.attached = true;
+    this.canvas.addEventListener('mousedown', this.handleMouseDown);
+    window.addEventListener('mousemove', this.handleMouseMove);
+    window.addEventListener('mouseup', this.handleMouseUp);
+    window.addEventListener('blur', this.cancelDrag);
+  }
+
+  detach() {
+    if (!this.attached) return;
+    this.attached = false;
+    this.dragging = false;
+    this.canvas.removeEventListener('mousedown', this.handleMouseDown);
+    window.removeEventListener('mousemove', this.handleMouseMove);
+    window.removeEventListener('mouseup', this.handleMouseUp);
+    window.removeEventListener('blur', this.cancelDrag);
+  }
+
+  private readonly handleMouseDown = (event: MouseEvent) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    this.dragging = true;
+    this.navigateToEvent(event);
+  };
+
+  private readonly handleMouseMove = (event: MouseEvent) => {
+    if (this.dragging) this.navigateToEvent(event);
+  };
+
+  private readonly handleMouseUp = (event: MouseEvent) => {
+    if (!this.dragging || event.button !== 0) return;
+    this.navigateToEvent(event);
+    this.dragging = false;
+  };
+
+  private readonly cancelDrag = () => {
+    this.dragging = false;
+  };
+
+  private navigateToEvent(event: MouseEvent) {
+    const bounds = this.canvas.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    this.onNavigate(minimapPointToWorld(
+      { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
+      { width: bounds.width, height: bounds.height },
+      this.mapBounds,
+    ));
+  }
 }
 
 /**

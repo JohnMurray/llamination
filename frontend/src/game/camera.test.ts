@@ -94,6 +94,13 @@ describe('SandboxNavigation', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
     expect(navigation.update(0.1)).toEqual({ x: 0, y: 10, zoom: 1 });
   });
+
+  it('centers on a world position without changing zoom', () => {
+    navigation = createNavigation(canvas);
+    navigation.centerAt(240, -160);
+
+    expect(navigation.camera).toEqual({ x: 240, y: -160, zoom: 1 });
+  });
 });
 
 function createNavigation(canvas: HTMLCanvasElement, onZoomChange?: (zoom: number) => void) {

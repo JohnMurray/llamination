@@ -90,6 +90,11 @@ export class SandboxNavigation {
     this.onZoomChange?.(this.cameraState.zoom);
   }
 
+  /** Repositions the camera without changing its current zoom. */
+  centerAt(x: number, y: number) {
+    this.cameraState = { ...this.cameraState, x, y };
+  }
+
   private readonly handleKeyDown = (event: KeyboardEvent) => {
     if (!MOVEMENT_KEYS.has(event.key)) return;
     event.preventDefault();
