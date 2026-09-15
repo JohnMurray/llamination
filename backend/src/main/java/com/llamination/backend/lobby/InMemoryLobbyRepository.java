@@ -2,6 +2,7 @@ package com.llamination.backend.lobby;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -65,7 +66,7 @@ public class InMemoryLobbyRepository implements LobbyRepository {
         }
 
         static <T> Collection<T> copyOf(Collection<T> values) {
-            return java.util.List.copyOf(values);
+            return List.copyOf(values);
         }
     }
 }

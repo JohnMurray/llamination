@@ -9,11 +9,12 @@ import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.List;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -139,7 +140,7 @@ public class LobbyService {
             ensureNotInLobby(username);
             List<Lobby> candidates = repository.findAll().stream()
                     .filter(this::isPubliclyJoinable)
-                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+                    .collect(Collectors.toCollection(ArrayList::new));
             if (candidates.isEmpty()) {
                 throw error(LobbyError.LOBBY_NOT_FOUND, "No public lobby is currently available");
             }

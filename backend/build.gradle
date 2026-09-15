@@ -27,6 +27,11 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 
+// Apply Error Prone consistently to production, test, and any future Java source sets.
+tasks.withType(JavaCompile).configureEach {
+    options.errorprone.error 'UnnecessarilyFullyQualified'
+}
+
 tasks.named('test') {
     useJUnitPlatform()
 }

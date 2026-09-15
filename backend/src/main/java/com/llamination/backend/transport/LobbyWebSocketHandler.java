@@ -3,6 +3,7 @@ package com.llamination.backend.transport;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -97,7 +98,7 @@ public class LobbyWebSocketHandler extends TextWebSocketHandler implements Lobby
     private void sendTo(Collection<String> usernames, String type, Object payload) {
         usernames.stream()
                 .map(sessionsByUsername::get)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .flatMap(Collection::stream)
                 .forEach(session -> send(session, type, payload));
     }

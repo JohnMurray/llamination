@@ -3,6 +3,7 @@ package com.llamination.backend.auth;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 
+import com.llamination.backend.lobby.LobbyService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,11 +18,9 @@ import org.springframework.web.server.ResponseStatusException;
 public class AuthController {
     private final UserCredentialStore credentialStore;
 
-    private final com.llamination.backend.lobby.LobbyService lobbyService;
+    private final LobbyService lobbyService;
 
-    public AuthController(
-            UserCredentialStore credentialStore,
-            com.llamination.backend.lobby.LobbyService lobbyService) {
+    public AuthController(UserCredentialStore credentialStore, LobbyService lobbyService) {
         this.credentialStore = credentialStore;
         this.lobbyService = lobbyService;
     }

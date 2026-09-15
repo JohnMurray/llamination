@@ -10,7 +10,9 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketHandler;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.WebSocketMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
@@ -114,7 +116,7 @@ class BackendApplicationTests {
             }
 
             @Override
-            public void afterConnectionClosed(WebSocketSession session, org.springframework.web.socket.CloseStatus closeStatus) {
+            public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) {
             }
 
             @Override
@@ -123,8 +125,7 @@ class BackendApplicationTests {
             }
         };
 
-        org.springframework.web.socket.WebSocketHttpHeaders headers =
-                new org.springframework.web.socket.WebSocketHttpHeaders();
+        WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
         headers.add("Cookie", cookie);
         WebSocketSession session = client.execute(
                         handler, headers, URI.create("ws://localhost:" + port + "/ws/events"))

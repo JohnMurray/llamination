@@ -2,6 +2,7 @@ package com.llamination.backend.lobby;
 
 import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -57,7 +58,7 @@ class LobbyServiceTests {
                 scheduler,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 new SecureRandom(new byte[] {1, 2, 3, 4}),
-                java.time.Duration.ofSeconds(5));
+                Duration.ofSeconds(5));
     }
 
     @Test
