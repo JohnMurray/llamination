@@ -5,6 +5,8 @@ import { createCenteredMapBounds, MinimapRenderer } from './minimap';
 import './GameSandboxPage.css';
 
 const INITIAL_CAMERA: Camera = { x: 0, y: 10, zoom: 1 };
+// Size of the square map in projected world units. The minimap uses this same
+// boundary so its viewport calculations cannot drift from the main renderer.
 const MAP_SIZE = 1_280;
 
 export function GameSandboxPage() {
@@ -14,6 +16,8 @@ export function GameSandboxPage() {
   const [zoomPercent, setZoomPercent] = useState(100);
 
   useEffect(() => {
+    // Canvas rendering and input are imperative and frame-driven; React owns
+    // only the surrounding controls and their small pieces of display state.
     const canvas = canvasRef.current;
     const minimapCanvas = minimapCanvasRef.current;
     if (!canvas || !minimapCanvas) return;
@@ -30,6 +34,8 @@ export function GameSandboxPage() {
       const bounds = canvas.getBoundingClientRect();
       const pixelRatio = window.devicePixelRatio || 1;
       viewport = { width: bounds.width, height: bounds.height };
+      // CSS dimensions define world-to-screen math. The larger backing store
+      // only supplies additional physical pixels for high-DPI displays.
       canvas.width = Math.round(bounds.width * pixelRatio);
       canvas.height = Math.round(bounds.height * pixelRatio);
       minimapRenderer.resize();
@@ -49,6 +55,8 @@ export function GameSandboxPage() {
     navigationRef.current = navigation;
 
     const render = (time: number) => {
+      // Limit a single update after a suspended/background tab so the camera
+      // does not jump a large distance while an arrow key is held.
       const elapsedSeconds = Math.min((time - previousTime) / 1000, 0.05);
       previousTime = time;
 
@@ -104,6 +112,9 @@ function drawScene(context: CanvasRenderingContext2D, viewport: { width: number;
   context.fillStyle = sky;
   context.fillRect(0, 0, viewport.width, viewport.height);
 
+  // Everything below draws in projected world coordinates. Translation puts
+  // the camera at screen center; scale and the inverse camera translation then
+  // provide zoom and pan without individual objects knowing about the camera.
   context.save();
   context.translate(viewport.width / 2, viewport.height / 2);
   context.scale(camera.zoom, camera.zoom);
@@ -121,6 +132,8 @@ function drawTerrain(context: CanvasRenderingContext2D) {
   const tileHeight = 64;
   const tileRadius = 16;
 
+  // A square clip defines the actual map boundary. Without it, iterating a
+  // square range of isometric rows and columns produces a diamond-shaped map.
   context.save();
   context.beginPath();
   context.rect(-MAP_SIZE / 2, -MAP_SIZE / 2, MAP_SIZE, MAP_SIZE);
@@ -130,6 +143,8 @@ function drawTerrain(context: CanvasRenderingContext2D) {
 
   for (let row = -tileRadius; row <= tileRadius; row += 1) {
     for (let column = -tileRadius; column <= tileRadius; column += 1) {
+      // Standard 2:1 isometric projection from tile coordinates into the
+      // screen-aligned projected world plane used by the camera.
       const x = (column - row) * tileWidth / 2;
       const y = (column + row) * tileHeight / 2;
       context.beginPath();
@@ -153,6 +168,7 @@ function drawTerrain(context: CanvasRenderingContext2D) {
 }
 
 function drawDecorations(context: CanvasRenderingContext2D) {
+  // Temporary scene data stays intentionally tiny until map storage exists.
   const flowers = [
     [-315, -70, '#ffe47a'], [-260, 102, '#f28cad'], [285, -118, '#fff0a0'],
     [350, 84, '#ef8fa4'], [-440, 50, '#f5c35d'], [470, -8, '#f29ac2'],
@@ -166,6 +182,8 @@ function drawDecorations(context: CanvasRenderingContext2D) {
 }
 
 function drawBuilding(context: CanvasRenderingContext2D) {
+  // The building is intentionally assembled from flat rectangles so camera
+  // and renderer iteration does not depend on a finished art pipeline.
   context.fillStyle = '#31543c55';
   context.fillRect(-119, 72, 258, 42);
 

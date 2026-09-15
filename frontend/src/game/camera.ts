@@ -1,9 +1,15 @@
+/**
+ * Camera position is the center of the viewport in projected world space.
+ * Projected world space is the 2D plane produced after the isometric projection;
+ * zoom is CSS pixels per projected-world unit.
+ */
 export type Camera = {
   x: number;
   y: number;
   zoom: number;
 };
 
+/** Canvas dimensions in CSS pixels, not backing-store/device pixels. */
 export type Viewport = {
   width: number;
   height: number;
@@ -11,6 +17,7 @@ export type Viewport = {
 
 type SandboxNavigationOptions = {
   canvas: HTMLCanvasElement;
+  // Resolve lazily because ResizeObserver can change the viewport after setup.
   getViewport: () => Viewport;
   initialCamera: Camera;
   onZoomChange?: (zoom: number) => void;
@@ -22,6 +29,10 @@ export const MAX_ZOOM = 2.5;
 const MOVEMENT_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 const SCREEN_PIXELS_PER_SECOND = 430;
 
+/**
+ * Owns camera input and state while leaving animation timing to the renderer.
+ * Call attach/detach with the canvas lifecycle and update once per frame.
+ */
 export class SandboxNavigation {
   private readonly canvas: HTMLCanvasElement;
   private readonly getViewport: () => Viewport;
@@ -44,6 +55,7 @@ export class SandboxNavigation {
   }
 
   attach() {
+    // Idempotency matters in development, where React Strict Mode remounts effects.
     if (this.attached) return;
     this.attached = true;
     window.addEventListener('keydown', this.handleKeyDown);
@@ -63,6 +75,7 @@ export class SandboxNavigation {
   }
 
   update(elapsedSeconds: number) {
+    // Opposing keys cancel naturally; holding a key produces continuous movement.
     const horizontal = Number(this.pressedKeys.has('ArrowRight')) - Number(this.pressedKeys.has('ArrowLeft'));
     const vertical = Number(this.pressedKeys.has('ArrowDown')) - Number(this.pressedKeys.has('ArrowUp'));
     if (horizontal || vertical) {
@@ -88,12 +101,16 @@ export class SandboxNavigation {
   };
 
   private readonly handleBlur = () => {
+    // A keyup event may never arrive if the browser loses focus mid-pan.
     this.pressedKeys.clear();
   };
 
   private readonly handleWheel = (event: WheelEvent) => {
+    // The listener is non-passive so zooming the game cannot also scroll the page.
     event.preventDefault();
     const bounds = this.canvas.getBoundingClientRect();
+    // Exponential scaling makes equal wheel deltas reciprocal in either direction
+    // and works for both discrete mouse wheels and high-resolution trackpads.
     const zoomFactor = Math.exp(-event.deltaY * 0.0015);
     this.cameraState = zoomAtPoint(
       this.cameraState,
@@ -116,6 +133,8 @@ export function zoomAtPoint(
   viewport: Viewport,
 ): Camera {
   const nextZoom = clampZoom(camera.zoom * zoomFactor);
+  // Find the world point beneath the pointer before changing zoom. Repositioning
+  // the camera around that point keeps it stationary on screen after the change.
   const worldX = camera.x + (pointer.x - viewport.width / 2) / camera.zoom;
   const worldY = camera.y + (pointer.y - viewport.height / 2) / camera.zoom;
 
@@ -127,6 +146,8 @@ export function zoomAtPoint(
 }
 
 export function panCamera(camera: Camera, xDirection: number, yDirection: number, elapsedSeconds: number): Camera {
+  // Normalize diagonals so two held keys are not faster than one. Dividing by
+  // zoom makes the perceived screen-space pan speed independent of zoom level.
   const directionLength = Math.hypot(xDirection, yDirection) || 1;
   const distance = (SCREEN_PIXELS_PER_SECOND * elapsedSeconds) / camera.zoom;
 

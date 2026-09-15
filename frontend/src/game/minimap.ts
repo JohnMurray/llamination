@@ -1,5 +1,6 @@
 import type { Camera, Viewport } from './camera';
 
+/** Axis-aligned bounds in the same projected world space used by Camera. */
 export type WorldBounds = {
   left: number;
   top: number;
@@ -24,6 +25,8 @@ export function calculateMinimapViewRect(
   mapBounds: WorldBounds,
   minimapViewport: Viewport,
 ): Rectangle | null {
+  // Convert the CSS-pixel viewport back into projected world units at the
+  // current zoom, then intersect it with the finite map.
   const halfViewWidth = gameViewport.width / camera.zoom / 2;
   const halfViewHeight = gameViewport.height / camera.zoom / 2;
   const visibleWorld = {
@@ -33,8 +36,12 @@ export function calculateMinimapViewRect(
     bottom: Math.min(mapBounds.bottom, camera.y + halfViewHeight),
   };
 
+  // The sandbox currently permits panning entirely away from the map. In that
+  // case there is no meaningful bright region or viewport outline to draw.
   if (visibleWorld.left >= visibleWorld.right || visibleWorld.top >= visibleWorld.bottom) return null;
 
+  // Scale axes independently so this remains correct if a future map or
+  // minimap is rectangular rather than square.
   const scaleX = minimapViewport.width / (mapBounds.right - mapBounds.left);
   const scaleY = minimapViewport.height / (mapBounds.bottom - mapBounds.top);
   return {
@@ -45,6 +52,11 @@ export function calculateMinimapViewRect(
   };
 }
 
+/**
+ * Draws a deliberately low-fidelity overview. Static map content is cached on
+ * an offscreen canvas; normal frames only composite that cache, a muted veil,
+ * the bright visible region, and its outline.
+ */
 export class MinimapRenderer {
   private readonly context: CanvasRenderingContext2D;
   private readonly baseCanvas = document.createElement('canvas');
@@ -68,6 +80,9 @@ export class MinimapRenderer {
     const nextPixelRatio = window.devicePixelRatio || 1;
     const pixelWidth = Math.round(bounds.width * nextPixelRatio);
     const pixelHeight = Math.round(bounds.height * nextPixelRatio);
+    // Check the offscreen canvas, not only the visible canvas. React Strict
+    // Mode can preserve the visible element's size while creating a new,
+    // still-empty renderer cache during its development remount.
     const cacheIsCurrent = this.baseCanvas.width === pixelWidth
       && this.baseCanvas.height === pixelHeight
       && this.viewport.width === nextViewport.width
@@ -77,6 +92,8 @@ export class MinimapRenderer {
     this.pixelRatio = nextPixelRatio;
     if (cacheIsCurrent) return;
 
+    // Keep drawing coordinates in CSS pixels while allocating enough backing
+    // pixels for a crisp result on high-density displays.
     if (this.canvas.width !== pixelWidth) this.canvas.width = pixelWidth;
     if (this.canvas.height !== pixelHeight) this.canvas.height = pixelHeight;
     this.baseCanvas.width = pixelWidth;
@@ -95,6 +112,8 @@ export class MinimapRenderer {
     this.context.imageSmoothingEnabled = false;
     this.drawCachedMap();
 
+    // Mute the entire map first. Repainting the cache inside the clipped camera
+    // rectangle below restores the original brightness only where visible.
     this.context.fillStyle = '#4750558c';
     this.context.fillRect(0, 0, width, height);
 
@@ -108,6 +127,8 @@ export class MinimapRenderer {
     this.drawCachedMap();
     this.context.restore();
 
+    // Inset by half the line width so the outline remains visible when the
+    // camera rectangle touches a minimap edge.
     const inset = 1.5;
     this.context.strokeStyle = '#e3423b';
     this.context.lineWidth = 3;
@@ -135,6 +156,9 @@ export class MinimapRenderer {
 }
 
 function drawLowFidelityMap(context: CanvasRenderingContext2D, viewport: Viewport) {
+  // This is an overview vocabulary, not a second rendering of the game scene:
+  // coarse terrain lines, one building marker, and a few landmark pixels. It
+  // should stay cheap to regenerate and readable at very small sizes.
   context.fillStyle = '#73ad61';
   context.fillRect(0, 0, viewport.width, viewport.height);
 
