@@ -1,9 +1,14 @@
 package com.llamination.backend.auth;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -15,35 +20,54 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
-    private final UserCredentialStore credentialStore;
+    private final AuthenticationManager authenticationManager;
+    private final SecurityContextRepository securityContextRepository;
 
     private final com.llamination.backend.lobby.LobbyService lobbyService;
 
     public AuthController(
-            UserCredentialStore credentialStore,
+            AuthenticationManager authenticationManager,
+            SecurityContextRepository securityContextRepository,
             com.llamination.backend.lobby.LobbyService lobbyService) {
-        this.credentialStore = credentialStore;
+        this.authenticationManager = authenticationManager;
+        this.securityContextRepository = securityContextRepository;
         this.lobbyService = lobbyService;
     }
 
     @PostMapping("/login")
-    public SessionResponse login(@RequestBody LoginRequest credentials, HttpServletRequest request) {
-        if (!credentialStore.authenticate(credentials.username(), credentials.password())) {
+    public SessionResponse login(
+            @RequestBody LoginRequest credentials,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        org.springframework.security.core.Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    UsernamePasswordAuthenticationToken.unauthenticated(
+                            credentials.username(), credentials.password()));
+        } catch (org.springframework.security.core.AuthenticationException exception) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
         }
 
         HttpSession session = request.getSession(true);
         request.changeSessionId();
-        session.setAttribute(SessionIdentity.USERNAME_ATTRIBUTE, credentials.username());
-        return new SessionResponse(true, credentials.username());
+        SessionIdentity.Identity identity = authenticationIdentity(authentication);
+        session.setAttribute(SessionIdentity.IDENTITY_ATTRIBUTE, identity);
+        session.setAttribute(SessionIdentity.USERNAME_ATTRIBUTE, identity.username());
+
+        var securityContext = SecurityContextHolder.createEmptyContext();
+        securityContext.setAuthentication(authentication);
+        SecurityContextHolder.setContext(securityContext);
+        securityContextRepository.saveContext(securityContext, request, response);
+        return new SessionResponse(true, identity.username());
     }
 
     @GetMapping("/session")
     public SessionResponse session(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
-        String username = session == null
+        SessionIdentity.Identity identity = session == null
                 ? null
-                : (String) session.getAttribute(SessionIdentity.USERNAME_ATTRIBUTE);
+                : (SessionIdentity.Identity) session.getAttribute(SessionIdentity.IDENTITY_ATTRIBUTE);
+        String username = identity == null ? null : identity.username();
         return new SessionResponse(username != null, username);
     }
 
@@ -57,7 +81,19 @@ public class AuthController {
                 lobbyService.leaveIfPresent(username);
             }
             session.invalidate();
+            SecurityContextHolder.clearContext();
         }
+    }
+
+    private SessionIdentity.Identity authenticationIdentity(
+            org.springframework.security.core.Authentication authentication) {
+        return authentication.getPrincipal() instanceof SessionIdentity.Identity identity
+                ? identity
+                : throwUnexpectedPrincipal();
+    }
+
+    private static SessionIdentity.Identity throwUnexpectedPrincipal() {
+        throw new IllegalStateException("Authentication did not provide a session identity");
     }
 
     public record LoginRequest(String username, String password) {

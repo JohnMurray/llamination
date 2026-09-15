@@ -3,6 +3,7 @@ package com.llamination.backend;
 import org.junit.jupiter.api.Tag;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -14,6 +15,7 @@ import org.testcontainers.utility.DockerImageName;
  * Tests are skipped on machines without Docker rather than silently substituting different stores.
  */
 @Tag("integration")
+@ActiveProfiles("dev")
 @Testcontainers(disabledWithoutDocker = true)
 public abstract class InfrastructureIntegrationTest {
 
