@@ -73,6 +73,19 @@ class PostgresLobbyPersistenceTests extends InfrastructureIntegrationTest {
     }
 
     @Test
+    void countdownDeadlineIsDiscoverableForRestartRecovery() {
+        LobbySnapshot lobby = service.create(COMMANDER, LobbyVisibility.PUBLIC, "Recover me");
+        service.joinPublic(lobby.id(), SCOUT);
+        LobbySnapshot countdown = service.start(lobby.id(), COMMANDER);
+
+        assertThat(repository.findPendingCountdowns()).singleElement().satisfies(pending -> {
+            assertThat(pending.lobbyId()).isEqualTo(lobby.id());
+            assertThat(pending.endsAt()).isEqualTo(countdown.countdownEndsAt());
+            assertThat(pending.version()).isEqualTo(countdown.version());
+        });
+    }
+
+    @Test
     void separateServiceInstancesCannotExceedCapacity() throws Exception {
         LobbySnapshot lobby = service.create(COMMANDER, LobbyVisibility.PUBLIC, "Database locking");
         List<LobbyPlayer> contenders = createContenders(12);

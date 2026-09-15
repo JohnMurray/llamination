@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -120,6 +121,18 @@ public class PostgresLobbyRepository implements LobbyRepository {
     }
 
     @Override
+    public Collection<PendingLobbyCountdown> findPendingCountdowns() {
+        return findCountdowns("state = 'COUNTDOWN' AND countdown_ends_at IS NOT NULL", Map.of());
+    }
+
+    @Override
+    public Collection<PendingLobbyCountdown> findDueCountdowns(Instant now) {
+        return findCountdowns(
+                "state = 'COUNTDOWN' AND countdown_ends_at IS NOT NULL AND countdown_ends_at <= :now",
+                Map.of("now", now));
+    }
+
+    @Override
     public void removePlayer(UUID userId) {
         jdbcClient.sql("DELETE FROM lobby_members WHERE user_id = :userId")
                 .param("userId", userId)
@@ -139,6 +152,19 @@ public class PostgresLobbyRepository implements LobbyRepository {
                 .query(this::mapLobbyRow)
                 .optional()
                 .map(this::hydrate);
+    }
+
+    private Collection<PendingLobbyCountdown> findCountdowns(String condition, Map<String, ?> parameters) {
+        return jdbcClient.sql("""
+                        SELECT lobby_id, countdown_ends_at, version
+                        FROM lobbies
+                        WHERE """ + condition + " ORDER BY countdown_ends_at, lobby_id")
+                .params(parameters)
+                .query((resultSet, rowNumber) -> new PendingLobbyCountdown(
+                        resultSet.getObject("lobby_id", UUID.class),
+                        resultSet.getObject("countdown_ends_at", OffsetDateTime.class).toInstant(),
+                        resultSet.getLong("version")))
+                .list();
     }
 
     private LobbyRow mapLobbyRow(java.sql.ResultSet resultSet, int rowNumber) throws java.sql.SQLException {

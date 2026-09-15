@@ -3,6 +3,7 @@ package com.llamination.backend.lobby;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 
 public interface LobbyRepository {
 
@@ -17,6 +18,10 @@ public interface LobbyRepository {
     Optional<Lobby> findByPlayer(UUID userId);
 
     Collection<Lobby> findAll();
+
+    Collection<PendingLobbyCountdown> findPendingCountdowns();
+
+    Collection<PendingLobbyCountdown> findDueCountdowns(Instant now);
 
     void removePlayer(UUID userId);
 

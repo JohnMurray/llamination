@@ -141,6 +141,43 @@ class LobbyServiceTests {
     }
 
     @Test
+    void persistedCountdownIsRescheduledAfterRestart() {
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Recover countdown");
+        service.joinPublic(lobby.id(), player("guest"));
+        service.start(lobby.id(), player("owner"));
+
+        List<Runnable> recoveredTasks = new ArrayList<>();
+        TaskScheduler recoveredScheduler = mock(TaskScheduler.class);
+        ScheduledFuture<?> scheduledFuture = mock(ScheduledFuture.class);
+        doAnswer(invocation -> {
+                    recoveredTasks.add(invocation.getArgument(0));
+                    return scheduledFuture;
+                })
+                .when(recoveredScheduler)
+                .schedule(any(Runnable.class), any(Instant.class));
+        RecordingGameStarter recoveredStarter = new RecordingGameStarter();
+        LobbyService recoveredService = new LobbyService(
+                repository,
+                () -> new LobbyConstraints("placeholder-map", 2, 6, 2, 3),
+                events,
+                recoveredStarter,
+                recoveredScheduler,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                new SecureRandom(new byte[] {5, 6, 7, 8}),
+                java.time.Duration.ofSeconds(5));
+
+        new LobbyCountdownRecovery(
+                        repository, recoveredService, recoveredScheduler, Clock.fixed(NOW, ZoneOffset.UTC))
+                .recoverPendingCountdowns();
+        assertThat(recoveredTasks).hasSize(1);
+        recoveredTasks.getFirst().run();
+
+        assertThat(recoveredService.getForMember(lobby.id(), player("owner").userId()).state())
+                .isEqualTo(LobbyState.STARTED);
+        assertThat(recoveredStarter.starts).hasValue(1);
+    }
+
+    @Test
     void teamChoiceHonorsPerTeamCapacity() {
         LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Team limits");
         service.chooseTeam(lobby.id(), player("owner"), TeamChoice.TEAM_ONE);

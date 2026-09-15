@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 
 /** Fast repository used by domain tests; production state is owned by PostgreSQL. */
 public class InMemoryLobbyRepository implements LobbyRepository {
@@ -50,6 +51,16 @@ public class InMemoryLobbyRepository implements LobbyRepository {
     }
 
     @Override
+    public Collection<PendingLobbyCountdown> findPendingCountdowns() {
+        return countdowns().toList();
+    }
+
+    @Override
+    public Collection<PendingLobbyCountdown> findDueCountdowns(Instant now) {
+        return countdowns().filter(countdown -> !countdown.endsAt().isAfter(now)).toList();
+    }
+
+    @Override
     public void delete(Lobby lobby) {
         lobbies.remove(lobby.id);
         lobby.members.keySet().forEach(playerLobbies::remove);
@@ -61,6 +72,12 @@ public class InMemoryLobbyRepository implements LobbyRepository {
     @Override
     public void removePlayer(UUID userId) {
         playerLobbies.remove(userId);
+    }
+
+    private java.util.stream.Stream<PendingLobbyCountdown> countdowns() {
+        return lobbies.values().stream()
+                .filter(lobby -> lobby.state == LobbyState.COUNTDOWN && lobby.countdownEndsAt != null)
+                .map(lobby -> new PendingLobbyCountdown(lobby.id, lobby.countdownEndsAt, lobby.version));
     }
 
     private static final class ListCopy {

@@ -21,6 +21,7 @@ import java.util.UUID;
 
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -44,6 +45,7 @@ public class LobbyService {
     private final Clock clock;
     private final SecureRandom random;
     private final Duration disconnectGrace;
+    private final ObjectProvider<LobbyService> transactionalSelf;
     private final Map<UUID, Long> presenceVersions = new HashMap<>();
 
     @Autowired
@@ -53,6 +55,7 @@ public class LobbyService {
             LobbyEventPublisher events,
             LobbyGameStarter gameStarter,
             TaskScheduler taskScheduler,
+            ObjectProvider<LobbyService> transactionalSelf,
             @Value("${llamination.lobby.disconnect-grace:5s}") Duration disconnectGrace) {
         this(
                 repository,
@@ -62,7 +65,8 @@ public class LobbyService {
                 taskScheduler,
                 Clock.systemUTC(),
                 new SecureRandom(),
-                disconnectGrace);
+                disconnectGrace,
+                transactionalSelf);
     }
 
     LobbyService(
@@ -74,6 +78,28 @@ public class LobbyService {
             Clock clock,
             SecureRandom random,
             Duration disconnectGrace) {
+        this(
+                repository,
+                constraintsProvider,
+                events,
+                gameStarter,
+                taskScheduler,
+                clock,
+                random,
+                disconnectGrace,
+                null);
+    }
+
+    private LobbyService(
+            LobbyRepository repository,
+            LobbyConstraintsProvider constraintsProvider,
+            LobbyEventPublisher events,
+            LobbyGameStarter gameStarter,
+            TaskScheduler taskScheduler,
+            Clock clock,
+            SecureRandom random,
+            Duration disconnectGrace,
+            ObjectProvider<LobbyService> transactionalSelf) {
         this.repository = repository;
         this.constraintsProvider = constraintsProvider;
         this.events = events;
@@ -82,6 +108,7 @@ public class LobbyService {
         this.clock = clock;
         this.random = random;
         this.disconnectGrace = disconnectGrace;
+        this.transactionalSelf = transactionalSelf;
     }
 
     public LobbySnapshot create(LobbyPlayer player, LobbyVisibility visibility, String rawDescription) {
@@ -244,14 +271,14 @@ public class LobbyService {
             expectedPresenceVersion = presenceVersions.merge(player.userId(), 1L, Long::sum);
         }
         var scheduledTask = taskScheduler.schedule(
-                () -> expireDisconnectedPlayer(player, expectedPresenceVersion),
+                () -> transactionalService().expireDisconnectedPlayer(player, expectedPresenceVersion),
                 clock.instant().plus(disconnectGrace));
         if (scheduledTask == null) {
             throw new IllegalStateException("Unable to schedule disconnected player cleanup");
         }
     }
 
-    void expireDisconnectedPlayer(LobbyPlayer player, long expectedPresenceVersion) {
+    public void expireDisconnectedPlayer(LobbyPlayer player, long expectedPresenceVersion) {
         synchronized (mutex) {
             if (!presenceVersions.getOrDefault(player.userId(), 0L).equals(expectedPresenceVersion)) {
                 return;
@@ -304,14 +331,14 @@ public class LobbyService {
 
     private void scheduleCountdownTask(CountdownStart countdown) {
         var scheduledTask = taskScheduler.schedule(
-                () -> finishCountdown(countdown.snapshot().id(), countdown.version()),
+                () -> transactionalService().finishCountdown(countdown.snapshot().id(), countdown.version()),
                 countdown.snapshot().countdownEndsAt());
         if (scheduledTask == null) {
             throw new IllegalStateException("Unable to schedule lobby countdown");
         }
     }
 
-    void finishCountdown(UUID lobbyId, long expectedVersion) {
+    public void finishCountdown(UUID lobbyId, long expectedVersion) {
         LobbySnapshot startingSnapshot;
         synchronized (mutex) {
             Optional<Lobby> found = repository.findByIdForUpdate(lobbyId);
@@ -583,6 +610,10 @@ public class LobbyService {
                 action.run();
             }
         });
+    }
+
+    private LobbyService transactionalService() {
+        return transactionalSelf == null ? this : transactionalSelf.getObject();
     }
 
     private static LobbyException error(LobbyError error, String message) {
