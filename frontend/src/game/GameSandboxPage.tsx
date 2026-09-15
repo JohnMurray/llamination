@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { type Camera, SandboxNavigation } from './camera';
+import { createCenteredMapBounds, MinimapRenderer } from './minimap';
 import './GameSandboxPage.css';
 
 const INITIAL_CAMERA: Camera = { x: 0, y: 10, zoom: 1 };
+const MAP_SIZE = 1_280;
 
 export function GameSandboxPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
   const navigationRef = useRef<SandboxNavigation>(null);
   const [zoomPercent, setZoomPercent] = useState(100);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const minimapCanvas = minimapCanvasRef.current;
+    if (!canvas || !minimapCanvas) return;
 
     const context = canvas.getContext('2d');
     if (!context) return;
+    const minimapRenderer = new MinimapRenderer(minimapCanvas, createCenteredMapBounds(MAP_SIZE));
 
     let viewport = { width: 1, height: 1 };
     let animationFrame = 0;
@@ -27,10 +32,12 @@ export function GameSandboxPage() {
       viewport = { width: bounds.width, height: bounds.height };
       canvas.width = Math.round(bounds.width * pixelRatio);
       canvas.height = Math.round(bounds.height * pixelRatio);
+      minimapRenderer.resize();
     };
 
     const resizeObserver = new ResizeObserver(resizeCanvas);
     resizeObserver.observe(canvas);
+    resizeObserver.observe(minimapCanvas);
     resizeCanvas();
     const navigation = new SandboxNavigation({
       canvas,
@@ -45,7 +52,9 @@ export function GameSandboxPage() {
       const elapsedSeconds = Math.min((time - previousTime) / 1000, 0.05);
       previousTime = time;
 
-      drawScene(context, viewport, navigation.update(elapsedSeconds));
+      const camera = navigation.update(elapsedSeconds);
+      drawScene(context, viewport, camera);
+      minimapRenderer.render(camera, viewport);
       animationFrame = requestAnimationFrame(render);
     };
 
@@ -65,6 +74,7 @@ export function GameSandboxPage() {
   return (
     <main className="game-sandbox">
       <canvas ref={canvasRef} className="game-canvas" aria-label="Isometric game sandbox with a small colorful building" />
+      <canvas ref={minimapCanvasRef} className="minimap-canvas" aria-label="Map overview and current camera view" />
       <header className="sandbox-title">
         <p className="eyebrow">Renderer sandbox</p>
         <h1>Sunny pasture</h1>
@@ -109,15 +119,14 @@ function drawScene(context: CanvasRenderingContext2D, viewport: { width: number;
 function drawTerrain(context: CanvasRenderingContext2D) {
   const tileWidth = 128;
   const tileHeight = 64;
-  const mapSize = 1_280;
   const tileRadius = 16;
 
   context.save();
   context.beginPath();
-  context.rect(-mapSize / 2, -mapSize / 2, mapSize, mapSize);
+  context.rect(-MAP_SIZE / 2, -MAP_SIZE / 2, MAP_SIZE, MAP_SIZE);
   context.clip();
   context.fillStyle = '#79b866';
-  context.fillRect(-mapSize / 2, -mapSize / 2, mapSize, mapSize);
+  context.fillRect(-MAP_SIZE / 2, -MAP_SIZE / 2, MAP_SIZE, MAP_SIZE);
 
   for (let row = -tileRadius; row <= tileRadius; row += 1) {
     for (let column = -tileRadius; column <= tileRadius; column += 1) {
@@ -140,7 +149,7 @@ function drawTerrain(context: CanvasRenderingContext2D) {
   context.restore();
   context.strokeStyle = '#3f7947';
   context.lineWidth = 8;
-  context.strokeRect(-mapSize / 2, -mapSize / 2, mapSize, mapSize);
+  context.strokeRect(-MAP_SIZE / 2, -MAP_SIZE / 2, MAP_SIZE, MAP_SIZE);
 }
 
 function drawDecorations(context: CanvasRenderingContext2D) {
