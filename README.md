@@ -6,14 +6,17 @@ coordinate amongst each other, sharing resources and units.
 
 ## Running locally
 
-Start the application from the backend directory:
+Start the application with the launch script:
 
 ```sh
-cd backend
-./gradlew bootRun
+./launch.sh
 ```
 
-Then open <http://localhost:8080>. Six development accounts are included for
+The launcher starts at port `8080`, selects the next available port if it is in
+use, and opens the application in your browser once the server is ready. Set
+`PORT` (or Spring's `SERVER_PORT`) to choose a different base port.
+
+Six development accounts are included for
 multi-browser lobby testing: `commander`, `scout`, `builder`, `rider`,
 `shepherd`, and `herder`. Their development password is `llama`.
 
