@@ -18,7 +18,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class BackendApplicationTests {
+class BackendApplicationTests extends InfrastructureIntegrationTest {
 
     @Value("${local.server.port}")
     private int port;
@@ -72,6 +72,19 @@ class BackendApplicationTests {
 
         assertThat(response.statusCode()).isEqualTo(401);
         assertThat(response.headers().firstValue("set-cookie")).isEmpty();
+    }
+
+    @Test
+    void lobbyApiRejectsUnauthenticatedRequest() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/api/lobbies"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = HttpClient.newHttpClient()
+                .send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(401);
     }
 
     @Test

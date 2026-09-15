@@ -1,16 +1,30 @@
 package com.llamination.backend.lobby;
 
+import java.util.UUID;
+
+/** Mutable team selection belonging to one stable authenticated player. */
 final class LobbyMember {
 
+    private final UUID userId;
     private final String username;
     private final boolean creator;
     private TeamChoice teamChoice;
     private Team assignedTeam;
 
-    LobbyMember(String username, boolean creator) {
+    LobbyMember(UUID userId, String username, boolean creator) {
+        this(userId, username, creator, TeamChoice.RANDOM, null);
+    }
+
+    LobbyMember(UUID userId, String username, boolean creator, TeamChoice teamChoice, Team assignedTeam) {
+        this.userId = userId;
         this.username = username;
         this.creator = creator;
-        this.teamChoice = TeamChoice.RANDOM;
+        this.teamChoice = teamChoice;
+        this.assignedTeam = assignedTeam;
+    }
+
+    UUID userId() {
+        return userId;
     }
 
     String username() {

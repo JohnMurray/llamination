@@ -4,8 +4,10 @@ bin/
 *.test
 coverage.out
 
-# Legacy Gradle cache (the previous backend used Gradle)
+# Gradle caches and generated output
 .gradle/
+backend/.gradle/
+backend/build/
 
 # Local IDE settings
 .idea/
@@ -16,3 +18,6 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+
+# Local developer configuration
+.env

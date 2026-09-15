@@ -138,7 +138,7 @@ function InviteLink({ token }: { token: string }) {
     await navigator.clipboard.writeText(url);
     setCopied(true);
   }
-  return <section className="invite-box"><div><h2>Invite players</h2><p>Anyone signed in with this link can join while the lobby is open.</p></div><div className="copy-row"><input readOnly value={url} aria-label="Invite link" /><button className="secondary" type="button" onClick={() => void copy()}>{copied ? 'Copied!' : 'Copy link'}</button></div></section>;
+  return <section className="invite-box"><div><h2>Invite players</h2><p>Copy this link now. It remains valid after a restart, but the server stores only its hash and may not display it again.</p></div><div className="copy-row"><input readOnly value={url} aria-label="Invite link" /><button className="secondary" type="button" onClick={() => void copy()}>{copied ? 'Copied!' : 'Copy link'}</button></div></section>;
 }
 
 function teamLabel(choice: TeamChoice) {

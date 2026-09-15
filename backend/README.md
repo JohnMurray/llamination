@@ -6,8 +6,12 @@ events.
 
 ## Run
 
+From the repository root, start PostgreSQL and Redis first:
+
 ```shell
-./gradlew bootRun
+./dev.sh up
+cd backend
+SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 ```
 
 Open <http://localhost:8080>. See the root README for development accounts and
@@ -33,9 +37,16 @@ directory invalidations, closures, and game-start events. A five-second
 disconnect grace period allows ordinary page refreshes without losing lobby
 membership; it is configured with `llamination.lobby.disconnect-grace`.
 
-Lobby storage and placeholder game creation are deliberately in-memory. The
-repository, constraint provider, and game starter are interfaces so durable
-storage, map metadata, and the authoritative simulation can replace them.
+Accounts and active lobby aggregates are stored in PostgreSQL. Spring Session
+stores authenticated HTTP sessions in Redis. Lobby mutations use database
+transactions and row locks, and events are emitted only after commit. Persisted
+countdown deadlines are rescheduled on startup and periodically reconciled, so
+a backend restart does not discard or strand a countdown.
+
+The first deployment target remains a single backend instance. Database locking
+and idempotent game creation are safe across instances, but WebSocket delivery
+and presence are still process-local. Redis Pub/Sub and distributed presence
+must be added before running multiple instances.
 
 ## Test
 
@@ -45,4 +56,7 @@ storage, map metadata, and the authoritative simulation can replace them.
 
 The Gradle suite compiles the production frontend and covers authentication,
 WebSocket connection, lobby lifecycle, team limits, automatic joining,
-disconnect recovery, countdown behavior, and concurrent capacity enforcement.
+disconnect recovery, countdown behavior, PostgreSQL reconstruction, and
+cross-instance concurrent capacity enforcement. Infrastructure integration
+tests use Testcontainers and are skipped when Docker is unavailable; Docker is
+required for the complete suite.

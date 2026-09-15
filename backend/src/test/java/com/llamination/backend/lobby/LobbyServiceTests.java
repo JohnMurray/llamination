@@ -1,6 +1,7 @@
 package com.llamination.backend.lobby;
 
 import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -62,7 +63,7 @@ class LobbyServiceTests {
 
     @Test
     void publicLobbyCanBeBrowsedWhilePrivateLobbyCannot() {
-        LobbySnapshot publicLobby = service.create("public-owner", LobbyVisibility.PUBLIC, "  Friendly match  ");
+        LobbySnapshot publicLobby = service.create(player("public-owner"), LobbyVisibility.PUBLIC, "  Friendly match  ");
 
         assertThat(service.browsePublic()).singleElement().satisfies(summary -> {
             assertThat(summary.id()).isEqualTo(publicLobby.id());
@@ -71,7 +72,7 @@ class LobbyServiceTests {
             assertThat(summary.maxPlayers()).isEqualTo(6);
         });
 
-        LobbySnapshot privateLobby = service.create("private-owner", LobbyVisibility.PRIVATE, "Invite only");
+        LobbySnapshot privateLobby = service.create(player("private-owner"), LobbyVisibility.PRIVATE, "Invite only");
         assertThat(privateLobby.inviteToken()).isNotBlank();
         assertThat(service.browsePublic()).extracting(PublicLobbySummary::id)
                 .containsExactly(publicLobby.id());
@@ -79,9 +80,9 @@ class LobbyServiceTests {
 
     @Test
     void fullLobbyStartsTenSecondCountdownAndRejectsMorePlayers() {
-        LobbySnapshot lobby = service.create("owner", LobbyVisibility.PUBLIC, "Six players");
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Six players");
         for (int index = 1; index <= 5; index++) {
-            lobby = service.joinPublic(lobby.id(), "player-" + index);
+            lobby = service.joinPublic(lobby.id(), player("player-" + index));
         }
 
         assertThat(lobby.state()).isEqualTo(LobbyState.COUNTDOWN);
@@ -89,17 +90,17 @@ class LobbyServiceTests {
         assertThat(lobby.members()).hasSize(6);
         assertThat(service.browsePublic()).isEmpty();
         UUID lobbyId = lobby.id();
-        assertThatThrownBy(() -> service.joinPublic(lobbyId, "too-late"))
+        assertThatThrownBy(() -> service.joinPublic(lobbyId, player("too-late")))
                 .isInstanceOfSatisfying(LobbyException.class,
                         exception -> assertThat(exception.error()).isEqualTo(LobbyError.LOBBY_NOT_JOINABLE));
     }
 
     @Test
     void creatorStartUsesCountdownAndResolvedTeamsAreBalanced() {
-        LobbySnapshot lobby = service.create("owner", LobbyVisibility.PUBLIC, "Start early");
-        service.joinPublic(lobby.id(), "guest");
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Start early");
+        service.joinPublic(lobby.id(), player("guest"));
 
-        LobbySnapshot countdown = service.start(lobby.id(), "owner");
+        LobbySnapshot countdown = service.start(lobby.id(), player("owner"));
 
         assertThat(countdown.state()).isEqualTo(LobbyState.COUNTDOWN);
         assertThat(countdown.countdownEndsAt()).isEqualTo(NOW.plusSeconds(10));
@@ -109,55 +110,92 @@ class LobbyServiceTests {
 
     @Test
     void nonCreatorLeavingCancelsCountdownButCreatorLeavingClosesLobby() {
-        LobbySnapshot lobby = service.create("owner", LobbyVisibility.PUBLIC, "Lifecycle");
-        service.joinPublic(lobby.id(), "guest");
-        LobbySnapshot countdown = service.start(lobby.id(), "owner");
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Lifecycle");
+        service.joinPublic(lobby.id(), player("guest"));
+        LobbySnapshot countdown = service.start(lobby.id(), player("owner"));
 
-        service.leave(lobby.id(), "guest");
+        service.leave(lobby.id(), player("guest"));
 
-        LobbySnapshot waiting = service.getForMember(lobby.id(), "owner");
+        LobbySnapshot waiting = service.getForMember(lobby.id(), player("owner").userId());
         assertThat(waiting.state()).isEqualTo(LobbyState.WAITING);
         assertThat(waiting.countdownEndsAt()).isNull();
         assertThat(waiting.members()).singleElement().satisfies(member -> assertThat(member.assignedTeam()).isNull());
-        service.leave(lobby.id(), "owner");
-        assertThat(service.currentLobby("owner")).isEmpty();
+        service.leave(lobby.id(), player("owner"));
+        assertThat(service.currentLobby(player("owner").userId())).isEmpty();
         assertThat(events.closedLobbyIds).containsExactly(countdown.id());
     }
 
     @Test
     void countdownCreatesOnlyOneGame() {
-        LobbySnapshot lobby = service.create("owner", LobbyVisibility.PUBLIC, "Exactly once");
-        service.joinPublic(lobby.id(), "guest");
-        LobbySnapshot countdown = service.start(lobby.id(), "owner");
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Exactly once");
+        service.joinPublic(lobby.id(), player("guest"));
+        LobbySnapshot countdown = service.start(lobby.id(), player("owner"));
 
         service.finishCountdown(lobby.id(), countdown.version());
         service.finishCountdown(lobby.id(), countdown.version());
 
-        LobbySnapshot started = service.getForMember(lobby.id(), "owner");
+        LobbySnapshot started = service.getForMember(lobby.id(), player("owner").userId());
         assertThat(started.state()).isEqualTo(LobbyState.STARTED);
         assertThat(started.gameId()).isEqualTo(gameStarter.gameId);
         assertThat(gameStarter.starts).hasValue(1);
     }
 
     @Test
+    void persistedCountdownIsRescheduledAfterRestart() {
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Recover countdown");
+        service.joinPublic(lobby.id(), player("guest"));
+        service.start(lobby.id(), player("owner"));
+
+        List<Runnable> recoveredTasks = new ArrayList<>();
+        TaskScheduler recoveredScheduler = mock(TaskScheduler.class);
+        ScheduledFuture<?> scheduledFuture = mock(ScheduledFuture.class);
+        doAnswer(invocation -> {
+                    recoveredTasks.add(invocation.getArgument(0));
+                    return scheduledFuture;
+                })
+                .when(recoveredScheduler)
+                .schedule(any(Runnable.class), any(Instant.class));
+        RecordingGameStarter recoveredStarter = new RecordingGameStarter();
+        LobbyService recoveredService = new LobbyService(
+                repository,
+                () -> new LobbyConstraints("placeholder-map", 2, 6, 2, 3),
+                events,
+                recoveredStarter,
+                recoveredScheduler,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                new SecureRandom(new byte[] {5, 6, 7, 8}),
+                java.time.Duration.ofSeconds(5));
+
+        new LobbyCountdownRecovery(
+                        repository, recoveredService, recoveredScheduler, Clock.fixed(NOW, ZoneOffset.UTC))
+                .recoverPendingCountdowns();
+        assertThat(recoveredTasks).hasSize(1);
+        recoveredTasks.getFirst().run();
+
+        assertThat(recoveredService.getForMember(lobby.id(), player("owner").userId()).state())
+                .isEqualTo(LobbyState.STARTED);
+        assertThat(recoveredStarter.starts).hasValue(1);
+    }
+
+    @Test
     void teamChoiceHonorsPerTeamCapacity() {
-        LobbySnapshot lobby = service.create("owner", LobbyVisibility.PUBLIC, "Team limits");
-        service.chooseTeam(lobby.id(), "owner", TeamChoice.TEAM_ONE);
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Team limits");
+        service.chooseTeam(lobby.id(), player("owner"), TeamChoice.TEAM_ONE);
         for (int index = 1; index <= 3; index++) {
-            service.joinPublic(lobby.id(), "player-" + index);
+            service.joinPublic(lobby.id(), player("player-" + index));
         }
-        service.chooseTeam(lobby.id(), "player-1", TeamChoice.TEAM_ONE);
-        service.chooseTeam(lobby.id(), "player-2", TeamChoice.TEAM_ONE);
+        service.chooseTeam(lobby.id(), player("player-1"), TeamChoice.TEAM_ONE);
+        service.chooseTeam(lobby.id(), player("player-2"), TeamChoice.TEAM_ONE);
 
         UUID lobbyId = lobby.id();
-        assertThatThrownBy(() -> service.chooseTeam(lobbyId, "player-3", TeamChoice.TEAM_ONE))
+        assertThatThrownBy(() -> service.chooseTeam(lobbyId, player("player-3"), TeamChoice.TEAM_ONE))
                 .isInstanceOfSatisfying(LobbyException.class,
                         exception -> assertThat(exception.error()).isEqualTo(LobbyError.TEAM_FULL));
     }
 
     @Test
     void concurrentJoinsNeverExceedCapacity() throws Exception {
-        LobbySnapshot lobby = service.create("owner", LobbyVisibility.PUBLIC, "Race safe");
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Race safe");
         int contenders = 12;
         CountDownLatch ready = new CountDownLatch(contenders);
         CountDownLatch go = new CountDownLatch(1);
@@ -170,7 +208,7 @@ class LobbyServiceTests {
                     ready.countDown();
                     try {
                         go.await(5, TimeUnit.SECONDS);
-                        service.joinPublic(lobby.id(), username);
+                        service.joinPublic(lobby.id(), player(username));
                         joined.incrementAndGet();
                     } catch (LobbyException ignored) {
                         // Expected once capacity is reached.
@@ -189,15 +227,15 @@ class LobbyServiceTests {
         }
 
         assertThat(joined).hasValue(5);
-        assertThat(service.getForMember(lobby.id(), "owner").members()).hasSize(6);
+        assertThat(service.getForMember(lobby.id(), player("owner").userId()).members()).hasSize(6);
     }
 
     @Test
     void autoJoinUsesOnlyPublicLobbies() {
-        service.create("private-owner", LobbyVisibility.PRIVATE, "Hidden");
-        LobbySnapshot expected = service.create("public-owner", LobbyVisibility.PUBLIC, "Visible");
+        service.create(player("private-owner"), LobbyVisibility.PRIVATE, "Hidden");
+        LobbySnapshot expected = service.create(player("public-owner"), LobbyVisibility.PUBLIC, "Visible");
 
-        LobbySnapshot joined = service.autoJoin("guest");
+        LobbySnapshot joined = service.autoJoin(player("guest"));
 
         assertThat(joined.id()).isEqualTo(expected.id());
         assertThat(joined.members()).extracting(LobbySnapshot.Member::username).contains("guest");
@@ -205,27 +243,31 @@ class LobbyServiceTests {
 
     @Test
     void reconnectDuringGracePeriodPreservesCreatorLobby() {
-        LobbySnapshot lobby = service.create("owner", LobbyVisibility.PUBLIC, "Reconnect");
-        service.playerConnected("owner");
-        service.playerDisconnected("owner");
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Reconnect");
+        service.playerConnected(player("owner").userId());
+        service.playerDisconnected(player("owner"));
         Runnable expiry = scheduledTasks.getLast();
 
-        service.playerConnected("owner");
+        service.playerConnected(player("owner").userId());
         expiry.run();
 
-        assertThat(service.getForMember(lobby.id(), "owner").state()).isEqualTo(LobbyState.WAITING);
+        assertThat(service.getForMember(lobby.id(), player("owner").userId()).state()).isEqualTo(LobbyState.WAITING);
     }
 
     @Test
     void creatorLobbyClosesAfterDisconnectGraceExpires() {
-        LobbySnapshot lobby = service.create("owner", LobbyVisibility.PUBLIC, "Disconnect");
-        service.playerConnected("owner");
-        service.playerDisconnected("owner");
+        LobbySnapshot lobby = service.create(player("owner"), LobbyVisibility.PUBLIC, "Disconnect");
+        service.playerConnected(player("owner").userId());
+        service.playerDisconnected(player("owner"));
 
         scheduledTasks.getLast().run();
 
-        assertThat(service.currentLobby("owner")).isEmpty();
+        assertThat(service.currentLobby(player("owner").userId())).isEmpty();
         assertThat(events.closedLobbyIds).containsExactly(lobby.id());
+    }
+
+    private static LobbyPlayer player(String username) {
+        return new LobbyPlayer(UUID.nameUUIDFromBytes(username.getBytes(StandardCharsets.UTF_8)), username);
     }
 
     private static final class RecordingEvents implements LobbyEventPublisher {

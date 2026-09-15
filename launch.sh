@@ -34,7 +34,7 @@ trap 'exit 143' TERM
 
 cd "$repo_root/backend"
 echo "Starting Llamination at $url"
-SERVER_PORT="$port" ./gradlew bootRun "$@" &
+SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-dev}" SERVER_PORT="$port" ./gradlew bootRun "$@" &
 server_pid=$!
 
 until curl --noproxy '*' --silent --fail --output /dev/null "$url"; do
