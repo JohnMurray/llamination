@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import com.llamination.backend.auth.SessionIdentity;
 import com.llamination.backend.lobby.LobbyService;
+import com.llamination.backend.lobby.LobbyPlayer;
 import com.llamination.backend.lobby.LobbySnapshot;
 import com.llamination.backend.lobby.LobbyVisibility;
 import com.llamination.backend.lobby.PublicLobbySummary;
@@ -40,30 +41,30 @@ public class LobbyController {
     public LobbySnapshot create(
             @RequestBody CreateLobbyRequest body, HttpServletRequest request) {
         return lobbyService.create(
-                SessionIdentity.requireUsername(request), body.visibility(), body.description());
+                player(request), body.visibility(), body.description());
     }
 
     @GetMapping("/lobbies/{lobbyId}")
     public LobbySnapshot get(
             @PathVariable UUID lobbyId, HttpServletRequest request) {
-        return lobbyService.getForMember(lobbyId, SessionIdentity.requireUsername(request));
+        return lobbyService.getForMember(lobbyId, SessionIdentity.require(request).userId());
     }
 
     @PostMapping("/lobbies/{lobbyId}/join")
     public LobbySnapshot join(
             @PathVariable UUID lobbyId, HttpServletRequest request) {
-        return lobbyService.joinPublic(lobbyId, SessionIdentity.requireUsername(request));
+        return lobbyService.joinPublic(lobbyId, player(request));
     }
 
     @PostMapping("/lobby-invites/{inviteToken}/join")
     public LobbySnapshot joinInvite(
             @PathVariable String inviteToken, HttpServletRequest request) {
-        return lobbyService.joinPrivate(inviteToken, SessionIdentity.requireUsername(request));
+        return lobbyService.joinPrivate(inviteToken, player(request));
     }
 
     @PostMapping("/lobbies/auto-join")
     public LobbySnapshot autoJoin(HttpServletRequest request) {
-        return lobbyService.autoJoin(SessionIdentity.requireUsername(request));
+        return lobbyService.autoJoin(player(request));
     }
 
     @PutMapping("/lobbies/{lobbyId}/team")
@@ -72,27 +73,32 @@ public class LobbyController {
             @RequestBody TeamChoiceRequest body,
             HttpServletRequest request) {
         return lobbyService.chooseTeam(
-                lobbyId, SessionIdentity.requireUsername(request), body.teamChoice());
+                lobbyId, player(request), body.teamChoice());
     }
 
     @PostMapping("/lobbies/{lobbyId}/start")
     public LobbySnapshot start(
             @PathVariable UUID lobbyId, HttpServletRequest request) {
-        return lobbyService.start(lobbyId, SessionIdentity.requireUsername(request));
+        return lobbyService.start(lobbyId, player(request));
     }
 
     @PostMapping("/lobbies/{lobbyId}/leave")
     public ResponseEntity<Void> leave(
             @PathVariable UUID lobbyId, HttpServletRequest request) {
-        lobbyService.leave(lobbyId, SessionIdentity.requireUsername(request));
+        lobbyService.leave(lobbyId, player(request));
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/me/lobby")
     public ResponseEntity<LobbySnapshot> current(HttpServletRequest request) {
-        return lobbyService.currentLobby(SessionIdentity.requireUsername(request))
+        return lobbyService.currentLobby(SessionIdentity.require(request).userId())
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    private static LobbyPlayer player(HttpServletRequest request) {
+        SessionIdentity.Identity identity = SessionIdentity.require(request);
+        return new LobbyPlayer(identity.userId(), identity.username());
     }
 
     public record CreateLobbyRequest(LobbyVisibility visibility, String description) {

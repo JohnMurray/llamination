@@ -1,5 +1,8 @@
 package com.llamination.backend.lobby;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -11,6 +14,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,9 +22,14 @@ import java.util.UUID;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
+@Transactional
 public class LobbyService {
 
     public static final Duration COUNTDOWN_DURATION = Duration.ofSeconds(10);
@@ -35,7 +44,7 @@ public class LobbyService {
     private final Clock clock;
     private final SecureRandom random;
     private final Duration disconnectGrace;
-    private final Map<String, Long> presenceVersions = new HashMap<>();
+    private final Map<UUID, Long> presenceVersions = new HashMap<>();
 
     @Autowired
     public LobbyService(
@@ -75,27 +84,29 @@ public class LobbyService {
         this.disconnectGrace = disconnectGrace;
     }
 
-    public LobbySnapshot create(String username, LobbyVisibility visibility, String rawDescription) {
+    public LobbySnapshot create(LobbyPlayer player, LobbyVisibility visibility, String rawDescription) {
         LobbySnapshot snapshot;
         synchronized (mutex) {
-            ensureNotInLobby(username);
+            ensureNotInLobby(player.userId());
             String description = normalizeDescription(rawDescription);
             String inviteToken = visibility == LobbyVisibility.PRIVATE ? newInviteToken() : null;
             Lobby lobby = new Lobby(
                     UUID.randomUUID(),
-                    username,
+                    player,
                     visibility,
                     description,
                     constraintsProvider.currentConstraints(),
                     inviteToken,
+                    hashInviteToken(inviteToken),
                     clock.instant());
-            repository.save(lobby);
+            saveWithNewMembership(lobby);
             snapshot = snapshot(lobby);
         }
         publishUpdate(snapshot, true);
         return snapshot;
     }
 
+    @Transactional(readOnly = true)
     public List<PublicLobbySummary> browsePublic() {
         synchronized (mutex) {
             return repository.findAll().stream()
@@ -106,37 +117,45 @@ public class LobbyService {
         }
     }
 
-    public Optional<LobbySnapshot> currentLobby(String username) {
+    @Transactional(readOnly = true)
+    public Optional<LobbySnapshot> currentLobby(UUID userId) {
         synchronized (mutex) {
-            return repository.findByPlayer(username).map(this::snapshot);
+            return repository.findByPlayer(userId).map(this::snapshot);
         }
     }
 
-    public LobbySnapshot getForMember(UUID lobbyId, String username) {
+    @Transactional(readOnly = true)
+    public LobbySnapshot getForMember(UUID lobbyId, UUID userId) {
         synchronized (mutex) {
             Lobby lobby = requireLobby(lobbyId);
-            requireMember(lobby, username);
+            requireMember(lobby, userId);
             return snapshot(lobby);
         }
     }
 
-    public LobbySnapshot joinPublic(UUID lobbyId, String username) {
-        return join(username, findPublicLobby(lobbyId));
+    public LobbySnapshot joinPublic(UUID lobbyId, LobbyPlayer player) {
+        synchronized (mutex) {
+            Lobby lobby = requireLobbyForUpdate(lobbyId);
+            if (lobby.visibility != LobbyVisibility.PUBLIC) {
+                throw error(LobbyError.LOBBY_NOT_FOUND, "Lobby not found");
+            }
+        }
+        return join(player, lobbyId);
     }
 
-    public LobbySnapshot joinPrivate(String inviteToken, String username) {
+    public LobbySnapshot joinPrivate(String inviteToken, LobbyPlayer player) {
         Lobby lobby;
         synchronized (mutex) {
-            lobby = repository.findByInviteToken(inviteToken)
+            lobby = repository.findByInviteTokenHash(hashInviteToken(inviteToken))
                     .orElseThrow(() -> error(LobbyError.LOBBY_NOT_FOUND, "Invite is invalid or expired"));
         }
-        return join(username, lobby);
+        return join(player, lobby.id);
     }
 
-    public LobbySnapshot autoJoin(String username) {
+    public LobbySnapshot autoJoin(LobbyPlayer player) {
         Lobby lobby;
         synchronized (mutex) {
-            ensureNotInLobby(username);
+            ensureNotInLobby(player.userId());
             List<Lobby> candidates = repository.findAll().stream()
                     .filter(this::isPubliclyJoinable)
                     .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
@@ -146,14 +165,14 @@ public class LobbyService {
             Collections.shuffle(candidates, random);
             lobby = candidates.getFirst();
         }
-        return join(username, lobby);
+        return join(player, lobby.id);
     }
 
-    public LobbySnapshot chooseTeam(UUID lobbyId, String username, TeamChoice choice) {
+    public LobbySnapshot chooseTeam(UUID lobbyId, LobbyPlayer player, TeamChoice choice) {
         LobbySnapshot snapshot;
         synchronized (mutex) {
-            Lobby lobby = requireLobby(lobbyId);
-            LobbyMember member = requireMember(lobby, username);
+            Lobby lobby = requireLobbyForUpdate(lobbyId);
+            LobbyMember member = requireMember(lobby, player.userId());
             requireWaiting(lobby);
             if (member.teamChoice() != choice
                     && choice != TeamChoice.RANDOM
@@ -162,18 +181,19 @@ public class LobbyService {
             }
             member.setTeamChoice(choice);
             lobby.changed();
+            repository.save(lobby);
             snapshot = snapshot(lobby);
         }
-        events.lobbyUpdated(snapshot);
+        afterCommit(() -> events.lobbyUpdated(snapshot));
         return snapshot;
     }
 
-    public LobbySnapshot start(UUID lobbyId, String username) {
+    public LobbySnapshot start(UUID lobbyId, LobbyPlayer player) {
         CountdownStart countdown;
         synchronized (mutex) {
-            Lobby lobby = requireLobby(lobbyId);
-            requireMember(lobby, username);
-            if (!lobby.creatorUsername.equals(username)) {
+            Lobby lobby = requireLobbyForUpdate(lobbyId);
+            requireMember(lobby, player.userId());
+            if (!lobby.creatorUserId.equals(player.userId())) {
                 throw error(LobbyError.NOT_CREATOR, "Only the lobby creator can start the game");
             }
             requireWaiting(lobby);
@@ -187,74 +207,74 @@ public class LobbyService {
         return countdown.snapshot();
     }
 
-    public void leave(UUID lobbyId, String username) {
+    public void leave(UUID lobbyId, LobbyPlayer player) {
         LeaveResult result;
         synchronized (mutex) {
-            Lobby lobby = requireLobby(lobbyId);
-            requireMember(lobby, username);
-            result = leaveLocked(lobby, username);
+            Lobby lobby = requireLobbyForUpdate(lobbyId);
+            requireMember(lobby, player.userId());
+            result = leaveLocked(lobby, player);
         }
         publishLeave(result);
     }
 
-    public void leaveIfPresent(String username) {
+    public void leaveIfPresent(LobbyPlayer player) {
         LeaveResult result;
         synchronized (mutex) {
-            Optional<Lobby> lobby = repository.findByPlayer(username);
+            Optional<Lobby> lobby = repository.findByPlayer(player.userId());
             if (lobby.isEmpty()) {
                 return;
             }
-            result = leaveLocked(lobby.get(), username);
+            result = leaveLocked(requireLobbyForUpdate(lobby.get().id), player);
         }
         publishLeave(result);
     }
 
-    public void playerConnected(String username) {
+    public void playerConnected(UUID userId) {
         synchronized (mutex) {
-            presenceVersions.merge(username, 1L, Long::sum);
+            presenceVersions.merge(userId, 1L, Long::sum);
         }
     }
 
-    public void playerDisconnected(String username) {
+    public void playerDisconnected(LobbyPlayer player) {
         long expectedPresenceVersion;
         synchronized (mutex) {
-            if (repository.findByPlayer(username).isEmpty()) {
+            if (repository.findByPlayer(player.userId()).isEmpty()) {
                 return;
             }
-            expectedPresenceVersion = presenceVersions.merge(username, 1L, Long::sum);
+            expectedPresenceVersion = presenceVersions.merge(player.userId(), 1L, Long::sum);
         }
         var scheduledTask = taskScheduler.schedule(
-                () -> expireDisconnectedPlayer(username, expectedPresenceVersion),
+                () -> expireDisconnectedPlayer(player, expectedPresenceVersion),
                 clock.instant().plus(disconnectGrace));
         if (scheduledTask == null) {
             throw new IllegalStateException("Unable to schedule disconnected player cleanup");
         }
     }
 
-    void expireDisconnectedPlayer(String username, long expectedPresenceVersion) {
+    void expireDisconnectedPlayer(LobbyPlayer player, long expectedPresenceVersion) {
         synchronized (mutex) {
-            if (!presenceVersions.getOrDefault(username, 0L).equals(expectedPresenceVersion)) {
+            if (!presenceVersions.getOrDefault(player.userId(), 0L).equals(expectedPresenceVersion)) {
                 return;
             }
         }
-        leaveIfPresent(username);
+        leaveIfPresent(player);
     }
 
-    private LobbySnapshot join(String username, Lobby expectedLobby) {
+    private LobbySnapshot join(LobbyPlayer player, UUID lobbyId) {
         LobbySnapshot snapshot;
         CountdownStart countdown = null;
         synchronized (mutex) {
-            ensureNotInLobby(username);
-            Lobby lobby = requireLobby(expectedLobby.id);
-            if (lobby != expectedLobby || lobby.state != LobbyState.WAITING) {
+            ensureNotInLobby(player.userId());
+            Lobby lobby = requireLobbyForUpdate(lobbyId);
+            if (lobby.state != LobbyState.WAITING) {
                 throw error(LobbyError.LOBBY_NOT_JOINABLE, "Lobby is no longer joinable");
             }
             if (lobby.members.size() >= lobby.constraints.maxPlayers()) {
                 throw error(LobbyError.LOBBY_FULL, "Lobby is full");
             }
-            lobby.members.put(username, new LobbyMember(username, false));
+            lobby.members.put(player.userId(), new LobbyMember(player.userId(), player.username(), false));
             lobby.changed();
-            repository.save(lobby);
+            saveWithNewMembership(lobby);
             if (lobby.members.size() == lobby.constraints.maxPlayers()) {
                 countdown = beginCountdown(lobby);
                 snapshot = countdown.snapshot();
@@ -269,25 +289,20 @@ public class LobbyService {
         return snapshot;
     }
 
-    private Lobby findPublicLobby(UUID lobbyId) {
-        synchronized (mutex) {
-            Lobby lobby = requireLobby(lobbyId);
-            if (lobby.visibility != LobbyVisibility.PUBLIC) {
-                throw error(LobbyError.LOBBY_NOT_FOUND, "Lobby not found");
-            }
-            return lobby;
-        }
-    }
-
     private CountdownStart beginCountdown(Lobby lobby) {
         resolveTeams(lobby);
         lobby.state = LobbyState.COUNTDOWN;
         lobby.countdownEndsAt = clock.instant().plus(COUNTDOWN_DURATION);
         lobby.changed();
+        repository.save(lobby);
         return new CountdownStart(snapshot(lobby), lobby.version);
     }
 
     private void scheduleCountdown(CountdownStart countdown) {
+        afterCommit(() -> scheduleCountdownTask(countdown));
+    }
+
+    private void scheduleCountdownTask(CountdownStart countdown) {
         var scheduledTask = taskScheduler.schedule(
                 () -> finishCountdown(countdown.snapshot().id(), countdown.version()),
                 countdown.snapshot().countdownEndsAt());
@@ -299,7 +314,7 @@ public class LobbyService {
     void finishCountdown(UUID lobbyId, long expectedVersion) {
         LobbySnapshot startingSnapshot;
         synchronized (mutex) {
-            Optional<Lobby> found = repository.findById(lobbyId);
+            Optional<Lobby> found = repository.findByIdForUpdate(lobbyId);
             if (found.isEmpty()) {
                 return;
             }
@@ -310,6 +325,7 @@ public class LobbyService {
             lobby.state = LobbyState.STARTING;
             lobby.countdownEndsAt = null;
             lobby.changed();
+            repository.save(lobby);
             startingSnapshot = snapshot(lobby);
         }
         publishUpdate(startingSnapshot, true);
@@ -324,47 +340,51 @@ public class LobbyService {
 
         LobbySnapshot startedSnapshot;
         synchronized (mutex) {
-            Lobby lobby = requireLobby(lobbyId);
+            Lobby lobby = requireLobbyForUpdate(lobbyId);
             if (lobby.state != LobbyState.STARTING) {
                 return;
             }
             lobby.state = LobbyState.STARTED;
             lobby.gameId = gameId;
             lobby.changed();
+            repository.save(lobby);
             startedSnapshot = snapshot(lobby);
         }
-        events.lobbyUpdated(startedSnapshot);
-        events.gameStarted(startedSnapshot);
+        afterCommit(() -> {
+            events.lobbyUpdated(startedSnapshot);
+            events.gameStarted(startedSnapshot);
+        });
     }
 
     private void restoreAfterStartFailure(UUID lobbyId) {
         LobbySnapshot snapshot;
         synchronized (mutex) {
-            Lobby lobby = requireLobby(lobbyId);
+            Lobby lobby = requireLobbyForUpdate(lobbyId);
             if (lobby.state != LobbyState.STARTING) {
                 return;
             }
             lobby.state = LobbyState.WAITING;
             lobby.members.values().forEach(LobbyMember::clearAssignedTeam);
             lobby.changed();
+            repository.save(lobby);
             snapshot = snapshot(lobby);
         }
         publishUpdate(snapshot, true);
     }
 
-    private LeaveResult leaveLocked(Lobby lobby, String username) {
-        List<String> affectedMembers = List.copyOf(lobby.members.keySet());
-        if (lobby.creatorUsername.equals(username)) {
+    private LeaveResult leaveLocked(Lobby lobby, LobbyPlayer player) {
+        List<String> affectedMembers = lobby.members.values().stream().map(LobbyMember::username).toList();
+        if (lobby.creatorUserId.equals(player.userId())) {
             lobby.state = LobbyState.CLOSED;
             lobby.changed();
             repository.delete(lobby);
-            affectedMembers.forEach(presenceVersions::remove);
+            lobby.members.keySet().forEach(presenceVersions::remove);
             return new LeaveResult(null, lobby.id, affectedMembers, true);
         }
 
-        lobby.members.remove(username);
-        repository.removePlayer(username);
-        presenceVersions.remove(username);
+        lobby.members.remove(player.userId());
+        repository.removePlayer(player.userId());
+        presenceVersions.remove(player.userId());
         if (lobby.state == LobbyState.COUNTDOWN || lobby.state == LobbyState.STARTING) {
             lobby.state = LobbyState.WAITING;
             lobby.countdownEndsAt = null;
@@ -372,16 +392,18 @@ public class LobbyService {
         }
         lobby.changed();
         repository.save(lobby);
-        return new LeaveResult(snapshot(lobby), lobby.id, List.of(username), false);
+        return new LeaveResult(snapshot(lobby), lobby.id, List.of(player.username()), false);
     }
 
     private void publishLeave(LeaveResult result) {
-        if (result.closed()) {
-            events.directoryChanged();
-            events.lobbyClosed(result.lobbyId(), result.affectedMembers(), "CREATOR_LEFT");
-        } else if (result.snapshot() != null) {
-            publishUpdate(result.snapshot(), true);
-        }
+        afterCommit(() -> {
+            if (result.closed()) {
+                events.directoryChanged();
+                events.lobbyClosed(result.lobbyId(), result.affectedMembers(), "CREATOR_LEFT");
+            } else if (result.snapshot() != null) {
+                publishUpdate(result.snapshot(), true);
+            }
+        });
     }
 
     private void resolveTeams(Lobby lobby) {
@@ -446,8 +468,16 @@ public class LobbyService {
         }
     }
 
-    private void ensureNotInLobby(String username) {
-        if (repository.findByPlayer(username).isPresent()) {
+    private void ensureNotInLobby(UUID userId) {
+        if (repository.findByPlayer(userId).isPresent()) {
+            throw error(LobbyError.ALREADY_IN_LOBBY, "Player is already in a lobby");
+        }
+    }
+
+    private void saveWithNewMembership(Lobby lobby) {
+        try {
+            repository.save(lobby);
+        } catch (DataIntegrityViolationException exception) {
             throw error(LobbyError.ALREADY_IN_LOBBY, "Player is already in a lobby");
         }
     }
@@ -457,8 +487,13 @@ public class LobbyService {
                 .orElseThrow(() -> error(LobbyError.LOBBY_NOT_FOUND, "Lobby not found"));
     }
 
-    private LobbyMember requireMember(Lobby lobby, String username) {
-        LobbyMember member = lobby.members.get(username);
+    private Lobby requireLobbyForUpdate(UUID lobbyId) {
+        return repository.findByIdForUpdate(lobbyId)
+                .orElseThrow(() -> error(LobbyError.LOBBY_NOT_FOUND, "Lobby not found"));
+    }
+
+    private LobbyMember requireMember(Lobby lobby, UUID userId) {
+        LobbyMember member = lobby.members.get(userId);
         if (member == null) {
             throw error(LobbyError.NOT_A_MEMBER, "Player is not a member of this lobby");
         }
@@ -479,6 +514,18 @@ public class LobbyService {
         byte[] bytes = new byte[24];
         random.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String hashInviteToken(String inviteToken) {
+        if (inviteToken == null) {
+            return null;
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(inviteToken.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private PublicLobbySummary summary(Lobby lobby) {
@@ -517,10 +564,25 @@ public class LobbyService {
     }
 
     private void publishUpdate(LobbySnapshot snapshot, boolean directoryChanged) {
-        if (directoryChanged) {
-            events.directoryChanged();
+        afterCommit(() -> {
+            if (directoryChanged) {
+                events.directoryChanged();
+            }
+            events.lobbyUpdated(snapshot);
+        });
+    }
+
+    private static void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            action.run();
+            return;
         }
-        events.lobbyUpdated(snapshot);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
     }
 
     private static LobbyException error(LobbyError error, String message) {

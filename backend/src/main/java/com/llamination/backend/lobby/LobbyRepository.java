@@ -10,13 +10,15 @@ public interface LobbyRepository {
 
     Optional<Lobby> findById(UUID id);
 
-    Optional<Lobby> findByInviteToken(String inviteToken);
+    Optional<Lobby> findByIdForUpdate(UUID id);
 
-    Optional<Lobby> findByPlayer(String username);
+    Optional<Lobby> findByInviteTokenHash(String inviteTokenHash);
+
+    Optional<Lobby> findByPlayer(UUID userId);
 
     Collection<Lobby> findAll();
 
-    void removePlayer(String username);
+    void removePlayer(UUID userId);
 
     void delete(Lobby lobby);
 }

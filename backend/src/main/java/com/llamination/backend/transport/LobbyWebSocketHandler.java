@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.llamination.backend.auth.SessionIdentity;
 import com.llamination.backend.lobby.LobbyEventPublisher;
+import com.llamination.backend.lobby.LobbyPlayer;
 import com.llamination.backend.lobby.LobbyService;
 import com.llamination.backend.lobby.LobbySnapshot;
 import org.springframework.beans.factory.ObjectProvider;
@@ -29,7 +30,7 @@ public class LobbyWebSocketHandler extends TextWebSocketHandler implements Lobby
     private final ObjectMapper objectMapper;
     private final ObjectProvider<LobbyService> lobbyService;
     private final Map<String, Set<WebSocketSession>> sessionsByUsername = new ConcurrentHashMap<>();
-    private final Map<String, String> usernamesBySessionId = new ConcurrentHashMap<>();
+    private final Map<String, LobbyPlayer> playersBySessionId = new ConcurrentHashMap<>();
 
     public LobbyWebSocketHandler(ObjectMapper objectMapper, ObjectProvider<LobbyService> lobbyService) {
         this.objectMapper = objectMapper;
@@ -38,18 +39,20 @@ public class LobbyWebSocketHandler extends TextWebSocketHandler implements Lobby
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        String username = (String) session.getAttributes().get(SessionIdentity.USERNAME_ATTRIBUTE);
-        if (username == null) {
+        SessionIdentity.Identity identity =
+                (SessionIdentity.Identity) session.getAttributes().get(SessionIdentity.IDENTITY_ATTRIBUTE);
+        if (identity == null) {
             session.close(CloseStatus.NOT_ACCEPTABLE.withReason("Authentication required"));
             return;
         }
         WebSocketSession safeSession = new ConcurrentWebSocketSessionDecorator(
                 session, SEND_TIMEOUT_MILLIS, BUFFER_SIZE_BYTES);
-        sessionsByUsername.computeIfAbsent(username, ignored -> ConcurrentHashMap.newKeySet())
+        LobbyPlayer player = new LobbyPlayer(identity.userId(), identity.username());
+        sessionsByUsername.computeIfAbsent(player.username(), ignored -> ConcurrentHashMap.newKeySet())
                 .add(safeSession);
-        usernamesBySessionId.put(safeSession.getId(), username);
-        lobbyService.getObject().playerConnected(username);
-        send(safeSession, "connected", Map.of("username", username));
+        playersBySessionId.put(safeSession.getId(), player);
+        lobbyService.getObject().playerConnected(player.userId());
+        send(safeSession, "connected", Map.of("username", player.username()));
     }
 
     @Override
@@ -117,32 +120,32 @@ public class LobbyWebSocketHandler extends TextWebSocketHandler implements Lobby
     }
 
     private RemovedSession removeSession(WebSocketSession session) {
-        String username = usernamesBySessionId.remove(session.getId());
-        if (username == null) {
+        LobbyPlayer player = playersBySessionId.remove(session.getId());
+        if (player == null) {
             return null;
         }
-        Set<WebSocketSession> sessions = sessionsByUsername.get(username);
+        Set<WebSocketSession> sessions = sessionsByUsername.get(player.username());
         boolean lastSession = true;
         if (sessions != null) {
             sessions.removeIf(candidate -> candidate.getId().equals(session.getId()));
             if (sessions.isEmpty()) {
-                sessionsByUsername.remove(username, sessions);
+                sessionsByUsername.remove(player.username(), sessions);
             } else {
                 lastSession = false;
             }
         }
-        return new RemovedSession(username, lastSession);
+        return new RemovedSession(player, lastSession);
     }
 
     private void recordDisconnect(RemovedSession removed) {
         if (removed != null && removed.lastSession()) {
-            lobbyService.getObject().playerDisconnected(removed.username());
+            lobbyService.getObject().playerDisconnected(removed.player());
         }
     }
 
     private record EventEnvelope(String type, Object payload) {
     }
 
-    private record RemovedSession(String username, boolean lastSession) {
+    private record RemovedSession(LobbyPlayer player, boolean lastSession) {
     }
 }

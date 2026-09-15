@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import com.llamination.backend.lobby.LobbyPlayer;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -76,9 +77,10 @@ public class AuthController {
     public void logout(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
         if (session != null) {
-            String username = (String) session.getAttribute(SessionIdentity.USERNAME_ATTRIBUTE);
-            if (username != null) {
-                lobbyService.leaveIfPresent(username);
+            SessionIdentity.Identity identity =
+                    (SessionIdentity.Identity) session.getAttribute(SessionIdentity.IDENTITY_ATTRIBUTE);
+            if (identity != null) {
+                lobbyService.leaveIfPresent(new LobbyPlayer(identity.userId(), identity.username()));
             }
             session.invalidate();
             SecurityContextHolder.clearContext();
